@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SPAT Agent</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 840px; margin: 2rem auto; padding: 0 1rem; }
+      button { padding: 0.6rem 1rem; margin: 0.25rem 0; cursor: pointer; }
+      pre { background: #111; color: #0f0; padding: 1rem; border-radius: 8px; overflow: auto; }
+      .row { display: flex; gap: .5rem; flex-wrap: wrap; }
+      input, select { padding: .55rem; min-width: 220px; }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>SPAT Agent</h1>
+    <p>Wallet login + owner signature flow for SPAT-billed tasks.</p>
+
+    <div class="card">
+      <h3>1) User Login (wallet signature)</h3>
+      <button id="connect">Connect + Login</button>
+      <div id="who"></div>
+    </div>
+
+    <div class="card">
+      <h3>2) Create Task (SPAT billed)</h3>
+      <div class="row">
+        <select id="kind">
+          <option value="TASK_BASIC">TASK_BASIC</option>
+          <option value="TASK_AUTOMATION">TASK_AUTOMATION</option>
+          <option value="SERVICE_SKILL_UPDATE">SERVICE_SKILL_UPDATE</option>
+        </select>
+        <input id="params" placeholder='{"prompt":"Do X"}' />
+      </div>
+      <button id="create">Create Task</button>
+      <p><small>Backend will return EIP-712 typed data that must be signed by owner EOA.</small></p>
+    </div>
+
+    <div class="card">
+      <h3>3) Owner Approves Spend Signature</h3>
+      <input id="taskId" placeholder="task id" />
+      <textarea id="ownerSig" rows="4" style="width:100%" placeholder="paste owner signature"></textarea>
+      <button id="confirm">Confirm Spend + Run</button>
+    </div>
+
+    <pre id="log"></pre>
+
+    <script>
+      let sessionToken = null;
+      let userAddress = null;
+
+      const log = (data) => {
+        document.getElementById("log").textContent =
+          typeof data === "string" ? data : JSON.stringify(data, null, 2);
+      };
+
+      async function api(path, method = "GET", body) {
+        const res = await fetch(path, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        return res.json();
+      }
+
+      document.getElementById("connect").onclick = async () => {
+        if (!window.ethereum) return log("Install MetaMask first.");
+        const [address] = await window.ethereum.request({ method: "eth_requestAccounts" });
+        const challenge = await api("/auth/challenge");
+        const signature = await window.ethereum.request({
+          method: "personal_sign",
+          params: [challenge.message, address],
+        });
+        const verify = await api("/auth/verify", "POST", {
+          address,
+          signature,
+          nonce: challenge.nonce,
+        });
+        sessionToken = verify.sessionToken;
+        userAddress = verify.address;
+        document.getElementById("who").textContent = `Logged in: ${userAddress}`;
+        log(verify);
+      };
+
+      document.getElementById("create").onclick = async () => {
+        if (!sessionToken) return log("Login first.");
+        const kind = document.getElementById("kind").value;
+        let parsed = {};
+        try { parsed = JSON.parse(document.getElementById("params").value || "{}"); } catch {}
+
+        const r = await api("/tasks/create", "POST", {
+          sessionToken,
+          kind,
+          params: parsed,
+        });
+        if (r.taskId) document.getElementById("taskId").value = r.taskId;
+        log(r);
+      };
+
+      document.getElementById("confirm").onclick = async () => {
+        if (!sessionToken) return log("Login first.");
+        const taskId = document.getElementById("taskId").value;
+        const ownerSignature = document.getElementById("ownerSig").value;
+        const r = await api("/tasks/confirm-spend", "POST", {
+          sessionToken,
+          taskId,
+          ownerSignature,
+        });
+        log(r);
+      };
+    </script>
+  </body>
+</html>

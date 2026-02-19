@@ -1,14 +1,21 @@
 {
   "name": "spat-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node backend/server.js"
+    "start": "node backend/server.js",
+    "build": "echo 'No build step yet'",
+    "deploy": "hardhat run scripts/deploy.js --network mainnet"
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "ethers": "^6.15.0",
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.24.3"
   }
 }

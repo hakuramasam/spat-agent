@@ -1,63 +1,72 @@
 # SPAT Agent
 
-This scaffold sets up a dedicated **SPAT Agent** with:
+Production-oriented scaffold for a dedicated **SPAT Agent** with:
 
-- A dedicated on-chain vault wallet contract for SPAT token custody/spending
-- Owner-controlled spending authorization via EIP-712 signature
-- Authenticated user login using wallet signature challenge
-- Signature request flow for SPAT spending operations
+- Agent-owned on-chain vault (`SPATAgentVault`) for SPAT custody/spending
+- Authenticated wallet login (challenge + signature)
+- Signature request flow for token spending authorization
+- SPAT-priced task/workflow service endpoints
+- Updatable skill/task model (OpenClaw-style service layer extension)
 
-## Given Parameters
+## Your live setup (confirmed)
 
 - SPAT token: `0x7f18bdbe376b3b0648ad75da2fcc52f8c107bcdf`
 - Controller EOA (owner): `0x4e26fc6eb05a1cdbd762609fde9958e5b8cc754d`
-- Initial funding target: `500000 SPAT` to vault contract address
+- Vault deployed: ✅
+- Initial 500000 SPAT funding to vault: ✅
 
-## Architecture
+## Project structure
 
-1. **SPATAgentVault.sol** (agent-owned wallet)
-   - Holds SPAT token
-   - Executes `spend(...)` only when a valid owner signature is presented
-   - Protects replay with nonce tracking and deadline
+- `contracts/SPATAgentVault.sol` - owner-signature controlled vault
+- `backend/server.js` - auth + billing + task APIs
+- `frontend/index.html` - simple MetaMask login/task UI
+- `hardhat.config.js` + `scripts/deploy.js` - deployment utilities
 
-2. **Backend API**
-   - `GET /auth/challenge` → wallet login challenge nonce
-   - `POST /auth/verify` → verifies signature and opens session
-   - `POST /spend/request` → creates typed-data payload for owner signature
+## Backend API
 
-3. **Agent Services Layer (to add)**
-   - Task automation endpoints
-   - Workflow execution with SPAT metering per task
-   - Skill update/install hooks (OpenClaw-style skill files)
+- `GET /auth/challenge`
+- `POST /auth/verify`
+- `GET /pricing`
+- `POST /tasks/create` (returns EIP-712 typed data for owner spend signature)
+- `POST /tasks/confirm-spend` (records owner approval + executes mocked task lifecycle)
+- `GET /tasks/:taskId`
 
-## Deploy + Fund
-
-1. Deploy `SPATAgentVault` with:
-   - `token_ = 0x7f18bdbe376b3b0648ad75da2fcc52f8c107bcdf`
-   - `owner_ = 0x4e26fc6eb05a1cdbd762609fde9958e5b8cc754d`
-
-2. Transfer `500000 SPAT` from a funded wallet to the deployed vault address.
-
-> Note: Actual token transfer requires signing on the target chain by a wallet that currently holds SPAT.
-
-## Run backend
+## Run locally
 
 ```bash
+cp .env.example .env
 npm install
-CHAIN_ID=1 VAULT_ADDRESS=0xYourVaultAddress npm start
+npm start
 ```
 
-## Security Notes
+Open `http://localhost:8787`.
 
-- Add JWT/session persistence (Redis/Postgres) for production
-- Add rate-limit and anti-replay at API level
-- Restrict CORS and enforce HTTPS
-- Use SIWE (EIP-4361) format for stronger login semantics
-- Add on-chain event indexing for accounting/audit dashboard
+## Deploy contract (if needed on another chain)
 
-## Next Build Steps
+```bash
+cp .env.example .env
+# fill RPC_URL, DEPLOYER_PK, SPAT_TOKEN
+npx hardhat run scripts/deploy.js --network mainnet
+```
 
-- Task billing engine (deduct SPAT by action type)
-- Service registry: tasks, automation workflows, paid skill invocations
-- Skill file updater compatible with OpenClaw AgentSkills pattern
-- Admin UI: balances, spend approvals, user sessions, usage analytics
+## Important production notes
+
+Current code provides secure primitives + flow scaffolding. Before mainnet production:
+
+1. Verify and relay owner signature to on-chain `spend(...)` call (or owner direct submit)
+2. Persist sessions/tasks in Redis/Postgres
+3. Enforce SIWE (EIP-4361), HTTPS-only, strict CORS, and rate limits
+4. Add role model (admin/operator/auditor)
+5. Add full workflow engine + skill install/update registry
+6. Add on-chain event indexing for transparent SPAT usage ledger
+
+## OpenClaw-style skill updates
+
+Implement skill operations under `TASK_AUTOMATION` / `SERVICE_SKILL_UPDATE` handlers:
+
+- Install skill bundle
+- Validate signed package/checksum
+- Hot-reload skill registry
+- Versioned rollback
+
+This keeps behavior aligned with updateable agent skill file architecture.
