@@ -11,6 +11,17 @@
       .row { display: flex; gap: .5rem; flex-wrap: wrap; }
       input, select { padding: .55rem; min-width: 220px; }
       .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+      .status-wrap { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; }
+      .dot { width: 10px; height: 10px; border-radius: 999px; background: #999; }
+      .dot.busy { background: #f59e0b; box-shadow: 0 0 0 0 rgba(245,158,11,.7); animation: pulse 1.2s infinite; }
+      .dot.ok { background: #10b981; }
+      .dot.err { background: #ef4444; }
+      .status-text { font-size: .95rem; color: #333; }
+      @keyframes pulse {
+        0% { box-shadow: 0 0 0 0 rgba(245,158,11,.7); }
+        70% { box-shadow: 0 0 0 10px rgba(245,158,11,0); }
+        100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
+      }
     </style>
   </head>
   <body>
@@ -53,11 +64,29 @@
       <button id="confirmDirect">Confirm Spend + Run (Direct)</button>
     </div>
 
+    <div class="card">
+      <h3>Live Status</h3>
+      <div class="status-wrap">
+        <div id="statusDot" class="dot"></div>
+        <div id="statusText" class="status-text">Idle</div>
+      </div>
+    </div>
+
     <pre id="log"></pre>
 
     <script>
       let sessionToken = null;
       let userAddress = null;
+
+      function setStatus(kind, text) {
+        const dot = document.getElementById("statusDot");
+        const label = document.getElementById("statusText");
+        dot.className = "dot";
+        if (kind === "busy") dot.classList.add("busy");
+        if (kind === "ok") dot.classList.add("ok");
+        if (kind === "err") dot.classList.add("err");
+        label.textContent = text;
+      }
 
       const log = (data) => {
         document.getElementById("log").textContent =
@@ -74,26 +103,34 @@
       }
 
       document.getElementById("connect").onclick = async () => {
-        if (!window.ethereum) return log("Install MetaMask first.");
-        const [address] = await window.ethereum.request({ method: "eth_requestAccounts" });
-        const challenge = await api("/auth/challenge");
-        const signature = await window.ethereum.request({
-          method: "personal_sign",
-          params: [challenge.message, address],
-        });
-        const verify = await api("/auth/verify", "POST", {
-          address,
-          signature,
-          nonce: challenge.nonce,
-        });
-        sessionToken = verify.sessionToken;
-        userAddress = verify.address;
-        document.getElementById("who").textContent = `Logged in: ${userAddress}`;
-        log(verify);
+        try {
+          setStatus("busy", "Signing login challenge...");
+          if (!window.ethereum) return log("Install MetaMask first.");
+          const [address] = await window.ethereum.request({ method: "eth_requestAccounts" });
+          const challenge = await api("/auth/challenge");
+          const signature = await window.ethereum.request({
+            method: "personal_sign",
+            params: [challenge.message, address],
+          });
+          const verify = await api("/auth/verify", "POST", {
+            address,
+            signature,
+            nonce: challenge.nonce,
+          });
+          sessionToken = verify.sessionToken;
+          userAddress = verify.address;
+          document.getElementById("who").textContent = `Logged in: ${userAddress}`;
+          setStatus("ok", "Wallet logged in");
+          log(verify);
+        } catch (e) {
+          setStatus("err", "Login failed");
+          log({ ok: false, error: e.message || String(e) });
+        }
       };
 
       document.getElementById("create").onclick = async () => {
         if (!sessionToken) return log("Login first.");
+        setStatus("busy", "Creating task...");
         const kind = document.getElementById("kind").value;
         let parsed = {};
         try { parsed = JSON.parse(document.getElementById("params").value || "{}"); } catch {}
@@ -103,12 +140,16 @@
           kind,
           params: parsed,
         });
-        if (r.taskId) document.getElementById("taskId").value = r.taskId;
+        if (r.taskId) {
+          document.getElementById("taskId").value = r.taskId;
+          setStatus("ok", `Task created: ${r.taskId}`);
+        }
         log(r);
       };
 
       document.getElementById("confirm").onclick = async () => {
         if (!sessionToken) return log("Login first.");
+        setStatus("busy", "Submitting relayer spend...");
         const taskId = document.getElementById("taskId").value;
         const ownerSignature = document.getElementById("ownerSig").value;
         const r = await api("/tasks/confirm-spend", "POST", {
@@ -116,6 +157,7 @@
           taskId,
           ownerSignature,
         });
+        setStatus(r?.ok ? "ok" : "err", r?.ok ? "Relayer spend confirmed" : "Relayer flow failed");
         log(r);
       };
 
@@ -140,6 +182,7 @@
           const taskId = document.getElementById("taskId").value;
           if (!taskId) return log("Set task id first.");
 
+          setStatus("busy", "Preparing direct spend...");
           const owner = await window.ethereum.request({ method: "eth_requestAccounts" });
           const ownerAddress = owner[0];
 
@@ -147,6 +190,7 @@
           const task = await api(`/tasks/${taskId}`);
           if (!task?.typedData) return log("Task typedData missing");
 
+          setStatus("busy", "Waiting owner signature...");
           const td = task.typedData;
           const sig = await window.ethereum.request({
             method: "eth_signTypedData_v4",
@@ -161,6 +205,7 @@
 
           if (!built?.txRequest) return log(built);
 
+          setStatus("busy", "Sending spend transaction...");
           const txHash = await window.ethereum.request({
             method: "eth_sendTransaction",
             params: [{ from: ownerAddress, ...built.txRequest }],
@@ -169,17 +214,21 @@
           document.getElementById("directTxHash").value = txHash;
           log({ ok: true, taskId, txHash, mode: "direct", step: "submitted_waiting_confirmation" });
 
+          setStatus("busy", "Confirming on-chain...");
           const receipt = await waitForReceipt(txHash);
           if (!receipt || receipt.status !== "0x1") {
+            setStatus("err", "Transaction failed");
             return log({ ok: false, taskId, txHash, error: "Transaction failed or reverted" });
           }
 
+          setStatus("busy", "Running task...");
           const confirmed = await api("/tasks/confirm-spend-direct", "POST", {
             sessionToken,
             taskId,
             txHash,
           });
 
+          setStatus("ok", "Done");
           log({
             ok: true,
             taskId,
@@ -190,6 +239,7 @@
             confirmed,
           });
         } catch (e) {
+          setStatus("err", "Direct flow failed");
           log({ ok: false, error: e.message || String(e) });
         }
       };
