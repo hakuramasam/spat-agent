@@ -11,6 +11,8 @@ app.use(express.static("frontend"));
 const CHAIN_ID = Number(process.env.CHAIN_ID || 1);
 const EOA_OWNER = (process.env.EOA_OWNER || "0x4e26fc6eb05a1cdbd762609fde9958e5b8cc754d").toLowerCase();
 const VAULT_ADDRESS = process.env.VAULT_ADDRESS || "";
+const RPC_URL = process.env.RPC_URL || "";
+const RELAYER_PK = process.env.RELAYER_PK || "";
 
 // Adjustable billing table (SPAT token smallest unit expected by client, e.g. 18 decimals)
 const PRICING = {
@@ -18,6 +20,10 @@ const PRICING = {
   TASK_AUTOMATION: process.env.COST_TASK_AUTOMATION || "3000000000000000000", // 3 SPAT
   SERVICE_SKILL_UPDATE: process.env.COST_SKILL_UPDATE || "5000000000000000000" // 5 SPAT
 };
+
+const VAULT_ABI = [
+  "function spend(address to,uint256 amount,uint256 nonce,uint256 deadline,string purpose,uint8 v,bytes32 r,bytes32 s)"
+];
 
 const sessions = new Map();
 const tasks = new Map();
@@ -52,6 +58,44 @@ function buildSpendTypedData({ to, amount, purpose }) {
     primaryType: "Spend",
     message: { to, amount, nonce: spendNonce, deadline, purpose }
   };
+}
+
+async function submitVaultSpend(typedData, ownerSignature) {
+  if (!RPC_URL || !RELAYER_PK || !VAULT_ADDRESS) {
+    throw new Error("Missing RPC_URL / RELAYER_PK / VAULT_ADDRESS for on-chain spend");
+  }
+
+  const recovered = ethers.verifyTypedData(
+    typedData.domain,
+    typedData.types,
+    typedData.message,
+    ownerSignature
+  ).toLowerCase();
+
+  if (recovered !== EOA_OWNER) {
+    throw new Error(`Invalid owner signature. expected=${EOA_OWNER} got=${recovered}`);
+  }
+
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const relayer = new ethers.Wallet(RELAYER_PK, provider);
+  const vault = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, relayer);
+
+  const sig = ethers.Signature.from(ownerSignature);
+  const { to, amount, nonce, deadline, purpose } = typedData.message;
+
+  const tx = await vault.spend(
+    to,
+    amount,
+    nonce,
+    deadline,
+    purpose,
+    sig.v,
+    sig.r,
+    sig.s
+  );
+
+  const receipt = await tx.wait();
+  return { txHash: tx.hash, blockNumber: receipt?.blockNumber ?? null };
 }
 
 app.get("/auth/challenge", (_req, res) => {
@@ -113,6 +157,7 @@ app.post("/tasks/create", (req, res) => {
     params: params || {},
     amount,
     purpose,
+    typedData,
     status: "AWAITING_OWNER_SIGNATURE",
     createdAt: new Date().toISOString()
   });
@@ -127,29 +172,41 @@ app.post("/tasks/create", (req, res) => {
   });
 });
 
-// This endpoint records approval payload to continue off-chain workflow execution.
-// On production: verify signature + submit spend() tx or queue relayer.
-app.post("/tasks/confirm-spend", (req, res) => {
-  const { sessionToken, taskId, ownerSignature } = req.body;
-  const session = sessions.get(sessionToken);
-  if (!session?.address) return res.status(401).json({ error: "Not logged in" });
+app.post("/tasks/confirm-spend", async (req, res) => {
+  try {
+    const { sessionToken, taskId, ownerSignature } = req.body;
+    const session = sessions.get(sessionToken);
+    if (!session?.address) return res.status(401).json({ error: "Not logged in" });
 
-  const task = tasks.get(taskId);
-  if (!task || task.owner !== session.address) return res.status(404).json({ error: "Task not found" });
-  if (!ownerSignature) return res.status(400).json({ error: "ownerSignature required" });
+    const task = tasks.get(taskId);
+    if (!task || task.owner !== session.address) return res.status(404).json({ error: "Task not found" });
+    if (!ownerSignature) return res.status(400).json({ error: "ownerSignature required" });
 
-  task.status = "SPEND_APPROVED";
-  task.ownerSignature = ownerSignature;
-  task.updatedAt = new Date().toISOString();
+    task.status = "SPEND_SUBMITTING";
+    task.ownerSignature = ownerSignature;
+    task.updatedAt = new Date().toISOString();
 
-  // Simulate execution lifecycle.
-  task.status = "RUNNING";
-  setTimeout(() => {
-    task.status = "DONE";
-    task.result = { summary: `Executed ${task.kind}`, completedAt: new Date().toISOString() };
-  }, 500);
+    const onchain = await submitVaultSpend(task.typedData, ownerSignature);
 
-  res.json({ ok: true, taskId, status: task.status });
+    task.status = "SPEND_CONFIRMED";
+    task.onchain = onchain;
+    task.updatedAt = new Date().toISOString();
+
+    task.status = "RUNNING";
+    setTimeout(() => {
+      task.status = "DONE";
+      task.result = {
+        summary: `Executed ${task.kind}`,
+        completedAt: new Date().toISOString(),
+        txHash: task.onchain?.txHash || null
+      };
+      task.updatedAt = new Date().toISOString();
+    }, 500);
+
+    res.json({ ok: true, taskId, status: task.status, onchain });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/tasks/:taskId", (req, res) => {
@@ -164,7 +221,8 @@ app.get("/health", (_req, res) => {
     name: "SPAT Agent API",
     chainId: CHAIN_ID,
     owner: EOA_OWNER,
-    vault: VAULT_ADDRESS || null
+    vault: VAULT_ADDRESS || null,
+    relayerReady: Boolean(RPC_URL && RELAYER_PK)
   });
 });
 
