@@ -22,7 +22,8 @@ const PRICING = {
 };
 
 const VAULT_ABI = [
-  "function spend(address to,uint256 amount,uint256 nonce,uint256 deadline,string purpose,uint8 v,bytes32 r,bytes32 s)"
+  "function spend(address to,uint256 amount,uint256 nonce,uint256 deadline,string purpose,uint8 v,bytes32 r,bytes32 s)",
+  "function usedNonce(uint256) view returns (bool)"
 ];
 
 const sessions = new Map();
@@ -204,6 +205,76 @@ app.post("/tasks/confirm-spend", async (req, res) => {
     }, 500);
 
     res.json({ ok: true, taskId, status: task.status, onchain });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Direct mode: owner wallet submits spend() tx directly from browser/wallet.
+// Server only verifies tx inclusion and nonce usage for the task typed-data.
+app.post("/tasks/confirm-spend-direct", async (req, res) => {
+  try {
+    const { sessionToken, taskId, txHash } = req.body;
+    const session = sessions.get(sessionToken);
+    if (!session?.address) return res.status(401).json({ error: "Not logged in" });
+
+    const task = tasks.get(taskId);
+    if (!task || task.owner !== session.address) return res.status(404).json({ error: "Task not found" });
+    if (!txHash) return res.status(400).json({ error: "txHash required" });
+    if (!RPC_URL || !VAULT_ADDRESS) return res.status(500).json({ error: "Missing RPC_URL / VAULT_ADDRESS" });
+
+    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt) return res.status(400).json({ error: "Transaction not found or not mined yet" });
+    if (receipt.status !== 1) return res.status(400).json({ error: "Transaction failed on-chain" });
+
+    const tx = await provider.getTransaction(txHash);
+    if (!tx) return res.status(400).json({ error: "Transaction unavailable" });
+    if (!tx.to || tx.to.toLowerCase() !== VAULT_ADDRESS.toLowerCase()) {
+      return res.status(400).json({ error: "Transaction target is not vault" });
+    }
+
+    const iface = new ethers.Interface(VAULT_ABI);
+    let decoded;
+    try {
+      decoded = iface.parseTransaction({ data: tx.data, value: tx.value });
+    } catch {
+      return res.status(400).json({ error: "Unable to decode vault transaction" });
+    }
+
+    if (!decoded || decoded.name !== "spend") {
+      return res.status(400).json({ error: "Transaction is not spend(...) call" });
+    }
+
+    const [to, amount, nonce, deadline, purpose] = decoded.args;
+    const m = task.typedData.message;
+
+    if (String(to).toLowerCase() !== String(m.to).toLowerCase()) return res.status(400).json({ error: "Mismatched recipient" });
+    if (String(amount) !== String(m.amount)) return res.status(400).json({ error: "Mismatched amount" });
+    if (String(nonce) !== String(m.nonce)) return res.status(400).json({ error: "Mismatched nonce" });
+    if (String(deadline) !== String(m.deadline)) return res.status(400).json({ error: "Mismatched deadline" });
+    if (String(purpose) !== String(m.purpose)) return res.status(400).json({ error: "Mismatched purpose" });
+
+    const vaultRead = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, provider);
+    const nonceUsed = await vaultRead.usedNonce(m.nonce);
+    if (!nonceUsed) return res.status(400).json({ error: "Vault nonce not marked used; spend not confirmed" });
+
+    task.status = "SPEND_CONFIRMED";
+    task.onchain = { txHash, blockNumber: receipt.blockNumber };
+    task.updatedAt = new Date().toISOString();
+
+    task.status = "RUNNING";
+    setTimeout(() => {
+      task.status = "DONE";
+      task.result = {
+        summary: `Executed ${task.kind} (direct mode)`,
+        completedAt: new Date().toISOString(),
+        txHash: task.onchain?.txHash || null
+      };
+      task.updatedAt = new Date().toISOString();
+    }, 500);
+
+    res.json({ ok: true, taskId, status: task.status, onchain: task.onchain, mode: "direct" });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

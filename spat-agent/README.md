@@ -28,7 +28,8 @@ Production-oriented scaffold for a dedicated **SPAT Agent** with:
 - `POST /auth/verify`
 - `GET /pricing`
 - `POST /tasks/create` (returns EIP-712 typed data for owner spend signature)
-- `POST /tasks/confirm-spend` (records owner approval + executes mocked task lifecycle)
+- `POST /tasks/confirm-spend` (relayer mode: backend submits on-chain spend)
+- `POST /tasks/confirm-spend-direct` (direct mode: owner submits tx, backend verifies and continues task)
 - `GET /tasks/:taskId`
 
 ## Run locally

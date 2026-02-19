@@ -38,10 +38,17 @@
     </div>
 
     <div class="card">
-      <h3>3) Owner Approves Spend Signature</h3>
+      <h3>3) Owner Approves Spend Signature (Relayer Mode)</h3>
       <input id="taskId" placeholder="task id" />
       <textarea id="ownerSig" rows="4" style="width:100%" placeholder="paste owner signature"></textarea>
-      <button id="confirm">Confirm Spend + Run</button>
+      <button id="confirm">Confirm Spend + Run (Relayer)</button>
+      <p><small>Relayer mode requires backend RELAYER_PK.</small></p>
+    </div>
+
+    <div class="card">
+      <h3>4) Direct Mode (owner submits tx in wallet)</h3>
+      <input id="directTxHash" placeholder="owner-submitted spend() tx hash" style="width:100%" />
+      <button id="confirmDirect">Confirm Spend + Run (Direct)</button>
     </div>
 
     <pre id="log"></pre>
@@ -106,6 +113,18 @@
           sessionToken,
           taskId,
           ownerSignature,
+        });
+        log(r);
+      };
+
+      document.getElementById("confirmDirect").onclick = async () => {
+        if (!sessionToken) return log("Login first.");
+        const taskId = document.getElementById("taskId").value;
+        const txHash = document.getElementById("directTxHash").value;
+        const r = await api("/tasks/confirm-spend-direct", "POST", {
+          sessionToken,
+          taskId,
+          txHash,
         });
         log(r);
       };
