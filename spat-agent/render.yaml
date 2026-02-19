@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: spat-agent
+    runtime: node
+    plan: starter
+    region: singapore
+    branch: master
+    rootDir: .
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PORT
+        value: 8787
+      - key: CHAIN_ID
+        sync: false
+      - key: RPC_URL
+        sync: false
+      - key: EOA_OWNER
+        value: 0x4e26fc6eb05a1cdbd762609fde9958e5b8cc754d
+      - key: VAULT_ADDRESS
+        sync: false
+      - key: RELAYER_PK
+        sync: false
+      - key: COST_TASK_BASIC
+        value: 1000000000000000000
+      - key: COST_TASK_AUTOMATION
+        value: 3000000000000000000
+      - key: COST_SKILL_UPDATE
+        value: 5000000000000000000

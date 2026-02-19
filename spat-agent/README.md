@@ -45,6 +45,28 @@ npm start
 
 Open `http://localhost:8787`.
 
+## Deploy on Render (recommended)
+
+This repo includes a `render.yaml` Blueprint.
+
+### One-time setup
+
+1. Go to Render Dashboard → **New** → **Blueprint**
+2. Select repo: `hakuramasam/spat-agent`
+3. Render detects `render.yaml` and creates service `spat-agent`
+4. Set secret env vars in Render UI:
+   - `CHAIN_ID`
+   - `RPC_URL`
+   - `VAULT_ADDRESS`
+   - `RELAYER_PK` (only if using relayer mode)
+5. Deploy
+
+### Notes
+
+- Health check endpoint: `/health`
+- Frontend UI is served by backend at root `/`
+- For safer ops, prefer direct mode in production and keep `RELAYER_PK` unset when not needed
+
 ## Deploy contract (if needed on another chain)
 
 ```bash
