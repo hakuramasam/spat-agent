@@ -45,7 +45,7 @@ npm start
 
 Open `http://localhost:8787`.
 
-## Deploy on Render (recommended)
+## Deploy on Render
 
 This repo includes a `render.yaml` Blueprint.
 
@@ -61,7 +61,24 @@ This repo includes a `render.yaml` Blueprint.
    - `RELAYER_PK` (only if using relayer mode)
 5. Deploy
 
-### Notes
+## Deploy on Railway
+
+This repo includes `railway.json` for Nixpacks + healthcheck.
+
+### One-time setup
+
+1. Go to Railway Dashboard → **New Project** → **Deploy from GitHub Repo**
+2. Select repo: `hakuramasam/spat-agent`
+3. Railway auto-detects Node app and uses `railway.json`
+4. Add environment variables in Railway:
+   - `CHAIN_ID`
+   - `RPC_URL`
+   - `VAULT_ADDRESS`
+   - `EOA_OWNER` (default is already set in code)
+   - `RELAYER_PK` (only if using relayer mode)
+5. Redeploy
+
+### Platform notes
 
 - Health check endpoint: `/health`
 - Frontend UI is served by backend at root `/`
