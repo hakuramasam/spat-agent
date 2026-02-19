@@ -29,6 +29,7 @@ Production-oriented scaffold for a dedicated **SPAT Agent** with:
 - `GET /pricing`
 - `POST /tasks/create` (returns EIP-712 typed data for owner spend signature)
 - `POST /tasks/confirm-spend` (relayer mode: backend submits on-chain spend)
+- `POST /tasks/direct-tx` (build raw spend tx request for owner wallet)
 - `POST /tasks/confirm-spend-direct` (direct mode: owner submits tx, backend verifies and continues task)
 - `GET /tasks/:taskId`
 

@@ -46,8 +46,10 @@
     </div>
 
     <div class="card">
-      <h3>4) Direct Mode (owner submits tx in wallet)</h3>
-      <input id="directTxHash" placeholder="owner-submitted spend() tx hash" style="width:100%" />
+      <h3>4) Direct Mode (one-click tx + verify)</h3>
+      <p><small>Requires owner wallet connected in browser for transaction send.</small></p>
+      <button id="buildAndSendDirect">Build + Send spend() Tx</button>
+      <input id="directTxHash" placeholder="tx hash (auto-filled)" style="width:100%" />
       <button id="confirmDirect">Confirm Spend + Run (Direct)</button>
     </div>
 
@@ -115,6 +117,43 @@
           ownerSignature,
         });
         log(r);
+      };
+
+      document.getElementById("buildAndSendDirect").onclick = async () => {
+        if (!sessionToken) return log("Login first.");
+        if (!window.ethereum) return log("Install MetaMask first.");
+
+        const taskId = document.getElementById("taskId").value;
+        if (!taskId) return log("Set task id first.");
+
+        const owner = await window.ethereum.request({ method: "eth_requestAccounts" });
+        const ownerAddress = owner[0];
+
+        // get typed data by reading task
+        const task = await api(`/tasks/${taskId}`);
+        if (!task?.typedData) return log("Task typedData missing");
+
+        const td = task.typedData;
+        const sig = await window.ethereum.request({
+          method: "eth_signTypedData_v4",
+          params: [ownerAddress, JSON.stringify(td)],
+        });
+
+        const built = await api("/tasks/direct-tx", "POST", {
+          sessionToken,
+          taskId,
+          ownerSignature: sig,
+        });
+
+        if (!built?.txRequest) return log(built);
+
+        const txHash = await window.ethereum.request({
+          method: "eth_sendTransaction",
+          params: [{ from: ownerAddress, ...built.txRequest }],
+        });
+
+        document.getElementById("directTxHash").value = txHash;
+        log({ ok: true, taskId, txHash, mode: "direct" });
       };
 
       document.getElementById("confirmDirect").onclick = async () => {

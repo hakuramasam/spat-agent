@@ -212,6 +212,58 @@ app.post("/tasks/confirm-spend", async (req, res) => {
 
 // Direct mode: owner wallet submits spend() tx directly from browser/wallet.
 // Server only verifies tx inclusion and nonce usage for the task typed-data.
+app.post("/tasks/direct-tx", (req, res) => {
+  try {
+    const { sessionToken, taskId, ownerSignature } = req.body;
+    const session = sessions.get(sessionToken);
+    if (!session?.address) return res.status(401).json({ error: "Not logged in" });
+
+    const task = tasks.get(taskId);
+    if (!task || task.owner !== session.address) return res.status(404).json({ error: "Task not found" });
+    if (!ownerSignature) return res.status(400).json({ error: "ownerSignature required" });
+    if (!VAULT_ADDRESS) return res.status(500).json({ error: "VAULT_ADDRESS not configured" });
+
+    const recovered = ethers.verifyTypedData(
+      task.typedData.domain,
+      task.typedData.types,
+      task.typedData.message,
+      ownerSignature
+    ).toLowerCase();
+
+    if (recovered !== EOA_OWNER) {
+      return res.status(401).json({ error: `Invalid owner signature. expected=${EOA_OWNER} got=${recovered}` });
+    }
+
+    const sig = ethers.Signature.from(ownerSignature);
+    const m = task.typedData.message;
+    const iface = new ethers.Interface(VAULT_ABI);
+
+    const data = iface.encodeFunctionData("spend", [
+      m.to,
+      m.amount,
+      m.nonce,
+      m.deadline,
+      m.purpose,
+      sig.v,
+      sig.r,
+      sig.s
+    ]);
+
+    res.json({
+      ok: true,
+      taskId,
+      txRequest: {
+        to: VAULT_ADDRESS,
+        data,
+        value: "0x0"
+      },
+      typedData: task.typedData
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 app.post("/tasks/confirm-spend-direct", async (req, res) => {
   try {
     const { sessionToken, taskId, txHash } = req.body;
