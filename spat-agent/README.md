@@ -31,6 +31,8 @@ Production-oriented scaffold for a dedicated **SPAT Agent** with:
 - `POST /tasks/confirm-spend` (relayer mode: backend submits on-chain spend)
 - `POST /tasks/direct-tx` (build raw spend tx request for owner wallet)
 - `POST /tasks/confirm-spend-direct` (direct mode: owner submits tx, backend verifies and continues task)
+
+Frontend direct mode now auto-polls tx receipt and auto-calls confirm endpoint after mining.
 - `GET /tasks/:taskId`
 
 ## Run locally
