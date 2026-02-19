@@ -53,6 +53,13 @@ cp .env.example .env
 npx hardhat run scripts/deploy.js --network mainnet
 ```
 
+## Secret safety
+
+- Never commit `.env` or private keys (`RELAYER_PK`, `DEPLOYER_PK`) to git.
+- This repo includes `.gitignore` rules to keep env files out of version control.
+- Only commit `.env.example` with placeholder values.
+- If a secret was ever committed, rotate it immediately.
+
 ## Important production notes
 
 Current code provides secure primitives + flow scaffolding. Before mainnet production:
