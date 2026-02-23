@@ -65,8 +65,17 @@ cast send 0x7f18bdbe376b3b0648ad75da2fcc52f8c107bcdf \
 
 > `AMOUNT_WEI` = `500000 * 10^decimals` (confirm token decimals first).
 
+## Backend hardening implemented
+
+- SIWE verification is now real (signature + nonce + chain check).
+- Session cookies hardened (`httpOnly`, `sameSite`, production `secure`).
+- Usage execution now verifies on-chain `Charged` event before queueing work.
+- Action + amount + requestId + user address are validated against receipt logs.
+
 ## Security notes
 
 - Keep treasury ownership on a multisig when possible (Safe preferred).
 - Use per-user spend caps and expirations in frontend policy.
 - Add server-side risk checks for automation tasks before executing.
+- Add Redis/session store in production (avoid in-memory sessions).
+- Add rate limiting for `/auth/*` and `/usage/*` endpoints.

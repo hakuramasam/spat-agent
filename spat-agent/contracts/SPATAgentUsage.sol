@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-interface IERC20Spender {
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
-}
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract SPATAgentUsage {
-    enum ActionType { MakeTask, RunWorkflow, UseService }
+    using SafeERC20 for IERC20;
 
-    IERC20Spender public immutable spat;
+    enum ActionType {
+        MakeTask,
+        RunWorkflow,
+        UseService
+    }
+
+    IERC20 public immutable spat;
     address public immutable treasury;
     address public owner;
 
     mapping(ActionType => uint256) public actionPrice;
+    mapping(bytes32 => bool) public requestCharged;
 
     event Charged(address indexed user, ActionType indexed actionType, uint256 amount, bytes32 requestId);
     event PriceSet(ActionType indexed actionType, uint256 amount);
@@ -28,7 +34,7 @@ contract SPATAgentUsage {
         require(spat_ != address(0), "BAD_TOKEN");
         require(treasury_ != address(0), "BAD_TREASURY");
         owner = owner_;
-        spat = IERC20Spender(spat_);
+        spat = IERC20(spat_);
         treasury = treasury_;
         emit OwnershipTransferred(address(0), owner_);
     }
@@ -39,9 +45,14 @@ contract SPATAgentUsage {
     }
 
     function charge(ActionType actionType, bytes32 requestId) external {
+        require(!requestCharged[requestId], "REQUEST_ALREADY_CHARGED");
+
         uint256 amount = actionPrice[actionType];
         require(amount > 0, "PRICE_NOT_SET");
-        require(spat.transferFrom(msg.sender, treasury, amount), "TRANSFER_FROM_FAIL");
+
+        requestCharged[requestId] = true;
+        spat.safeTransferFrom(msg.sender, treasury, amount);
+
         emit Charged(msg.sender, actionType, amount, requestId);
     }
 

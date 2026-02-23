@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-interface IERC20 {
-    function transfer(address to, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-}
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract SPATAgentTreasury {
+    using SafeERC20 for IERC20;
+
     address public owner;
     IERC20 public immutable spat;
 
@@ -35,7 +35,7 @@ contract SPATAgentTreasury {
 
     function payout(address to, uint256 amount) external onlyOwner {
         require(to != address(0), "BAD_TO");
-        require(spat.transfer(to, amount), "TRANSFER_FAIL");
+        spat.safeTransfer(to, amount);
         emit Payout(to, amount);
     }
 
