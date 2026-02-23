@@ -159,6 +159,23 @@ Backend now executes and persists artifacts per paid action:
 - `runWorkflow` → executes real HTTP/webhook steps and stores result
 - `useService` → calls real service integrations (webhook or configured service map)
 
+### Requested action templates implemented
+
+1) **Create web-apps/websites/games on Base**
+- Use action: `runWorkflow`
+- Send prompt payload (`objective`, `appType`, `features`)
+- Requires `payment.usdcValue >= 1`
+
+2) **Create tokens on Base**
+- Use action: `useService` with `service: "token-creator"`
+- Send token params: `name`, `symbol`, `supply` (plus optional `basedOnProject`)
+- Requires `payment.usdcValue >= 1`
+
+3) **Create task events (e.g., Farcaster growth quests)**
+- Use action: `makeTask` with `taskType: "social-growth"`
+- Requires `payment.usdcValue >= 1`
+- Requires `reward.usdcValuePerCompletion >= 5`
+
 ### Real integration config
 
 Add in backend `.env`:

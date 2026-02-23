@@ -112,6 +112,19 @@ type ServiceConfig = {
   authHeaderEnv?: string;
 };
 
+
+type ActionPolicy = {
+  minUsd: number;
+  description: string;
+};
+
+const ACTION_POLICIES: Record<Action, ActionPolicy> = {
+  makeTask: { minUsd: 1, description: "Create task events" },
+  runWorkflow: { minUsd: 1, description: "Build/deploy web apps, websites, games on Base" },
+  useService: { minUsd: 1, description: "Create tokens on Base / specialized services" }
+};
+
+
 const dataDir = path.join(process.cwd(), "data");
 const dbPath = path.join(dataDir, "runtime-db.json");
 
@@ -191,7 +204,7 @@ async function doHttpCall(input: HttpCallInput) {
 }
 
 async function runWorkflowIntegration(user: string, payload: any) {
-  const runName = payload?.name || "default-workflow";
+  const runName = payload?.name || "base-app-builder";
   const steps = (payload?.steps || []) as WorkflowStep[];
 
   const effectiveSteps =
@@ -206,6 +219,10 @@ async function runWorkflowIntegration(user: string, payload: any) {
             body: {
               user,
               workflow: runName,
+              objective: payload?.objective || "create_web3_app",
+              appType: payload?.appType || "web-app",
+              features: payload?.features || [],
+              chain: "base-mainnet",
               input: payload?.input || {},
               timestamp: new Date().toISOString()
             }
@@ -256,6 +273,42 @@ async function runWorkflowIntegration(user: string, payload: any) {
 async function runServiceIntegration(user: string, payload: any) {
   const serviceName = String(payload?.service || "").trim();
   if (!serviceName) throw new Error("payload.service is required for useService");
+
+  if (serviceName === "token-creator") {
+    const tokenSpec = {
+      name: payload?.params?.name,
+      symbol: payload?.params?.symbol,
+      supply: payload?.params?.supply,
+      basedOnProject: payload?.params?.basedOnProject || null,
+      chain: "base-mainnet"
+    };
+    if (!tokenSpec.name || !tokenSpec.symbol || !tokenSpec.supply) {
+      throw new Error("token-creator requires params: name, symbol, supply");
+    }
+
+    const endpoint = payload?.params?.deployWebhook || WORKFLOW_DEFAULT_WEBHOOK;
+    if (!endpoint) {
+      throw new Error("token-creator requires deployWebhook or WORKFLOW_DEFAULT_WEBHOOK");
+    }
+
+    const result = await doHttpCall({
+      url: endpoint,
+      method: "POST",
+      body: {
+        user,
+        service: "token-creator",
+        token: tokenSpec
+      }
+    });
+
+    if (!result.ok) throw new Error(`token-creator failed with status ${result.status}`);
+
+    return {
+      service: serviceName,
+      status: result.status,
+      response: result.data
+    };
+  }
 
   if (serviceName === "webhook") {
     if (!payload?.params?.url) throw new Error("payload.params.url is required for webhook service");
@@ -379,16 +432,42 @@ function requireAuth(req: any, res: any, next: any) {
   next();
 }
 
+
+function assertMinUsdValue(action: Action, payload: any) {
+  const declaredUsd = Number(payload?.payment?.usdcValue ?? payload?.usdcValue ?? 0);
+  const minUsd = ACTION_POLICIES[action].minUsd;
+  if (!Number.isFinite(declaredUsd) || declaredUsd < minUsd) {
+    throw new Error(`Action '${action}' requires minimum ${minUsd} USDC worth of value`);
+  }
+}
+
+function assertTaskEventRewardPolicy(payload: any) {
+  const rewardUsd = Number(payload?.reward?.usdcValuePerCompletion ?? 0);
+  if (!Number.isFinite(rewardUsd) || rewardUsd < 5) {
+    throw new Error("Task events require reward >= 5 USDC value per completion");
+  }
+}
+
 async function executeAction(user: string, action: Action, payload: any) {
   const now = new Date().toISOString();
   const db = await loadDb();
 
+  assertMinUsdValue(action, payload);
+
   if (action === "makeTask") {
+    if (payload?.taskType === "social-growth") {
+      assertTaskEventRewardPolicy(payload);
+    }
+
     const task: Task = {
       id: newId("task"),
       user,
-      title: payload?.title || "Untitled Task",
-      details: payload?.details,
+      title: payload?.title || payload?.eventName || "Untitled Task",
+      details:
+        payload?.details ||
+        (payload?.taskType === "social-growth"
+          ? `Platform=${payload?.platform || "farcaster"}; action=${payload?.socialAction || "follow_or_like_recast"}; target=${payload?.target || ""}`
+          : undefined),
       createdAt: now
     };
     db.tasks.push(task);
@@ -602,6 +681,28 @@ app.get("/workflows", usageLimiter, requireAuth, async (req: any, res) => {
 app.get("/services", usageLimiter, requireAuth, async (req: any, res) => {
   const db = await loadDb();
   res.json({ serviceRuns: db.serviceRuns.filter((s) => s.user === req.session.address) });
+});
+
+app.get("/catalog/actions", (_req, res) => {
+  res.json({
+    actions: {
+      runWorkflow: {
+        description: "Create web-apps/websites/games on Base via prompt",
+        minimumValuePolicy: "1 USDC worth",
+        requiredPayload: ["payment.usdcValue >= 1", "objective/appType/features"]
+      },
+      useService: {
+        description: "Create Base tokens (standalone or based on created projects)",
+        minimumValuePolicy: "1 USDC worth",
+        services: ["token-creator", "webhook", "<SERVICE_MAP_JSON names>"]
+      },
+      makeTask: {
+        description: "Create task events (e.g., Farcaster growth campaigns)",
+        minimumValuePolicy: "1 USDC worth",
+        rewardPolicy: "reward.usdcValuePerCompletion >= 5 for social-growth tasks"
+      }
+    }
+  });
 });
 
 app.listen(Number(PORT || 8787), () => {
