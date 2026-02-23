@@ -17,10 +17,24 @@ let currentAction = "runWorkflow";
 const statusEl = document.getElementById("status");
 const authStateEl = document.getElementById("authState");
 const addressEl = document.getElementById("address");
+const validationEl = document.getElementById("validation");
+const historyEl = document.getElementById("history");
 
 function setStatus(msg, err = false) {
   statusEl.className = err ? "err" : "ok";
   statusEl.textContent = msg;
+}
+
+function setTimeline(step) {
+  const order = ["validate", "connect", "auth", "approve", "charge", "execute"];
+  const i = order.indexOf(step);
+  document.querySelectorAll("#timeline li").forEach((li) => {
+    const idx = order.indexOf(li.dataset.step);
+    li.classList.remove("done", "current", "todo");
+    if (idx < i) li.classList.add("done");
+    else if (idx === i) li.classList.add("current");
+    else li.classList.add("todo");
+  });
 }
 
 function setupTabs() {
@@ -31,6 +45,7 @@ function setupTabs() {
       btn.classList.add("active");
       document.querySelectorAll(".panel").forEach((p) => p.classList.add("hidden"));
       document.getElementById(`panel-${currentAction}`).classList.remove("hidden");
+      validateCurrentForm();
     });
   });
 }
@@ -90,6 +105,38 @@ function str(id) {
   return (document.getElementById(id).value || "").trim();
 }
 
+function validateCurrentForm() {
+  const errors = [];
+
+  if (currentAction === "runWorkflow") {
+    if (num("wfUsdc") < 1) errors.push("USDC value must be at least 1.");
+    if (!str("wfObjective")) errors.push("Objective is required.");
+  }
+
+  if (currentAction === "useService") {
+    if (num("tkUsdc") < 1) errors.push("USDC value must be at least 1.");
+    if (!str("tkName")) errors.push("Token name is required.");
+    if (!str("tkSymbol")) errors.push("Token symbol is required.");
+    if (!str("tkSupply")) errors.push("Token supply is required.");
+  }
+
+  if (currentAction === "makeTask") {
+    if (num("tsUsdc") < 1) errors.push("USDC value must be at least 1.");
+    if (num("tsRewardUsdc") < 5) errors.push("Reward per completion must be at least 5 USDC.");
+    if (!str("tsTarget")) errors.push("Target is required.");
+  }
+
+  if (errors.length) {
+    validationEl.className = "validation err";
+    validationEl.textContent = errors.join(" ");
+    return { ok: false, errors };
+  }
+
+  validationEl.className = "validation ok";
+  validationEl.textContent = "Looks good ✅";
+  return { ok: true, errors: [] };
+}
+
 function buildPayload() {
   if (currentAction === "runWorkflow") {
     return {
@@ -98,9 +145,7 @@ function buildPayload() {
       objective: str("wfObjective") || "create_web3_app",
       appType: str("wfAppType") || "web-app",
       features: str("wfFeatures").split(",").map((v) => v.trim()).filter(Boolean),
-      steps: str("wfWebhook")
-        ? [{ type: "webhook", url: str("wfWebhook"), method: "POST" }]
-        : undefined
+      steps: str("wfWebhook") ? [{ type: "webhook", url: str("wfWebhook"), method: "POST" }] : undefined
     };
   }
 
@@ -133,11 +178,43 @@ function buildPayload() {
   };
 }
 
+async function refreshHistory() {
+  try {
+    const r = await fetch(`${BACKEND}/jobs`, { credentials: "include" });
+    if (!r.ok) {
+      historyEl.textContent = "Login and run at least one action to view history.";
+      return;
+    }
+    const data = await r.json();
+    const jobs = data.jobs || [];
+    if (!jobs.length) {
+      historyEl.textContent = "No jobs yet.";
+      return;
+    }
+
+    historyEl.innerHTML = jobs
+      .slice()
+      .reverse()
+      .map(
+        (j) => `<div class="history-item"><span class="pill">${j.action}</span> <span class="pill">${j.status}</span><br/><small>${j.id} · ${new Date(j.updatedAt).toLocaleString()}</small></div>`
+      )
+      .join("");
+  } catch {
+    historyEl.textContent = "Failed to load history.";
+  }
+}
+
 async function runFlow() {
   try {
+    setTimeline("validate");
+    const check = validateCurrentForm();
+    if (!check.ok) throw new Error("Please fix validation errors first.");
+
+    setTimeline("connect");
     setStatus("Connecting wallet...");
     if (!signer) await connectWallet();
 
+    setTimeline("auth");
     setStatus("Signing SIWE login...");
     await siweLogin();
 
@@ -150,16 +227,19 @@ async function runFlow() {
     const requestId = randomRequestId();
     const payload = buildPayload();
 
+    setTimeline("approve");
     setStatus("Requesting approve() signature...");
     const token = new ethers.Contract(SPAT_TOKEN, erc20Abi, signer);
     const approveTx = await token.approve(usageContractAddress, amount);
     await approveTx.wait();
 
+    setTimeline("charge");
     setStatus("Charging in SPAT on-chain...");
     const usage = new ethers.Contract(usageContractAddress, usageAbi, signer);
     const chargeTx = await usage.charge(actionType, requestId);
     const rcpt = await chargeTx.wait();
 
+    setTimeline("execute");
     setStatus("Verifying payment + executing...");
     const execRes = await fetch(`${BACKEND}/usage/execute`, {
       method: "POST",
@@ -174,11 +254,18 @@ async function runFlow() {
     }
 
     setStatus("Done ✅ Action executed successfully");
+    await refreshHistory();
   } catch (e) {
     setStatus(e.message || "Flow failed", true);
   }
 }
 
 setupTabs();
+validateCurrentForm();
+["wfObjective","wfUsdc","tkName","tkSymbol","tkSupply","tkUsdc","tsTarget","tsUsdc","tsRewardUsdc"].forEach((id)=>{
+  const el=document.getElementById(id);
+  if(el) el.addEventListener("input", validateCurrentForm);
+});
 document.getElementById("connectBtn").addEventListener("click", connectWallet);
 document.getElementById("runBtn").addEventListener("click", runFlow);
+document.getElementById("refreshHistoryBtn").addEventListener("click", refreshHistory);

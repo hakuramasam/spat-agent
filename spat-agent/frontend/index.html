@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SPAT Agent</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 24px; max-width: 900px; }
+      body { font-family: Arial, sans-serif; margin: 24px; max-width: 980px; }
       button, select, input, textarea { padding: 8px 10px; margin: 4px 0; width: 100%; box-sizing: border-box; }
       .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
       .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -16,6 +16,14 @@
       .err { color: #ad2121; }
       .hidden { display: none; }
       code { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; }
+      .timeline { margin: 8px 0; padding-left: 18px; }
+      .timeline li { margin: 3px 0; }
+      .timeline .done { color: #0a7c2f; }
+      .timeline .current { color: #111; font-weight: bold; }
+      .timeline .todo { color: #888; }
+      .history-item { border-top: 1px solid #eee; padding: 8px 0; font-size: 14px; }
+      .pill { display: inline-block; border: 1px solid #ddd; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+      .validation { font-size: 13px; margin-top: 6px; }
     </style>
   </head>
   <body>
@@ -83,9 +91,28 @@
         <label>USDC Value (min 1)</label><input id="tsUsdc" type="number" min="1" step="0.01" value="1" />
       </div>
 
+      <div id="validation" class="validation"></div>
       <button id="runBtn">Approve + Charge + Execute</button>
+
+      <ul id="timeline" class="timeline">
+        <li data-step="validate" class="todo">Validate input</li>
+        <li data-step="connect" class="todo">Connect wallet</li>
+        <li data-step="auth" class="todo">Sign SIWE login</li>
+        <li data-step="approve" class="todo">Approve SPAT spending</li>
+        <li data-step="charge" class="todo">Charge usage on-chain</li>
+        <li data-step="execute" class="todo">Execute action</li>
+      </ul>
+
       <div class="muted">No JSON editing needed — payload is generated automatically.</div>
       <div id="status"></div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <h3>Job History</h3>
+        <button id="refreshHistoryBtn">Refresh</button>
+      </div>
+      <div id="history" class="muted">No history loaded yet.</div>
     </div>
 
     <script src="./config.js"></script>
