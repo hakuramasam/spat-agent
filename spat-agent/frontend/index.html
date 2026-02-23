@@ -5,16 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SPAT Agent</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 32px; max-width: 780px; }
-      button, select { padding: 8px 12px; margin: 4px 0; }
-      .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-      code { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; }
+      body { font-family: Arial, sans-serif; margin: 24px; max-width: 900px; }
+      button, select, input, textarea { padding: 8px 10px; margin: 4px 0; width: 100%; box-sizing: border-box; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+      .tab-btn.active { background: #111; color: #fff; }
+      .muted { color: #666; font-size: 13px; }
       .ok { color: #0a7c2f; }
       .err { color: #ad2121; }
+      .hidden { display: none; }
+      code { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; }
     </style>
   </head>
   <body>
     <h1>SPAT Agent</h1>
+
     <div class="card">
       <button id="connectBtn">Connect Wallet</button>
       <div>Address: <code id="address">-</code></div>
@@ -22,17 +28,63 @@
     </div>
 
     <div class="card">
-      <h3>Usage</h3>
-      <label>Action:</label>
-      <select id="action">
-        <option value="makeTask">makeTask (1 SPAT)</option>
-        <option value="runWorkflow">runWorkflow (3 SPAT)</option>
-        <option value="useService">useService (0.5 SPAT)</option>
-      </select>
-      <br />
-      <label>Payload (JSON, optional):</label><br />
-      <textarea id="payload" rows="6" cols="72" placeholder='{"title":"My task","details":"..."}'></textarea><br />
+      <h3>Create / Use Actions</h3>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="runWorkflow">1) Build App/Website/Game</button>
+        <button class="tab-btn" data-tab="useService">2) Create Token</button>
+        <button class="tab-btn" data-tab="makeTask">3) Create Task Event</button>
+      </div>
+
+      <div id="panel-runWorkflow" class="panel">
+        <div class="row">
+          <div><label>Project Name</label><input id="wfName" placeholder="base-social-game-builder" /></div>
+          <div>
+            <label>App Type</label>
+            <select id="wfAppType">
+              <option value="web-app">Web App</option>
+              <option value="website">Website</option>
+              <option value="game">Game</option>
+            </select>
+          </div>
+        </div>
+        <label>Objective</label><input id="wfObjective" placeholder="create_web3_game" />
+        <label>Features (comma separated)</label><input id="wfFeatures" placeholder="wallet connect, base mainnet, leaderboard" />
+        <label>Workflow Webhook URL</label><input id="wfWebhook" placeholder="https://your-builder-api.example.com/create" />
+        <label>USDC Value (min 1)</label><input id="wfUsdc" type="number" min="1" step="0.01" value="1" />
+      </div>
+
+      <div id="panel-useService" class="panel hidden">
+        <div class="row">
+          <div><label>Token Name</label><input id="tkName" placeholder="SPAT Quest Reward" /></div>
+          <div><label>Token Symbol</label><input id="tkSymbol" placeholder="SQR" /></div>
+        </div>
+        <div class="row">
+          <div><label>Total Supply (raw units)</label><input id="tkSupply" placeholder="1000000000000000000000000" /></div>
+          <div><label>Based on Project (optional)</label><input id="tkProject" placeholder="base-social-game-builder" /></div>
+        </div>
+        <label>Deploy Webhook URL</label><input id="tkWebhook" placeholder="https://your-token-api.example.com/deploy" />
+        <label>USDC Value (min 1)</label><input id="tkUsdc" type="number" min="1" step="0.01" value="1" />
+      </div>
+
+      <div id="panel-makeTask" class="panel hidden">
+        <div class="row">
+          <div><label>Task Title</label><input id="tsTitle" placeholder="Farcaster growth quest" /></div>
+          <div><label>Platform</label><input id="tsPlatform" placeholder="farcaster" value="farcaster" /></div>
+        </div>
+        <div class="row">
+          <div><label>Action</label><input id="tsAction" placeholder="follow_like_recast" value="follow_like_recast" /></div>
+          <div><label>Target URL/Profile</label><input id="tsTarget" placeholder="farcaster.xyz/yourprofile" /></div>
+        </div>
+        <label>Details</label><textarea id="tsDetails" rows="3" placeholder="Follow profile and like+recast pinned cast"></textarea>
+        <div class="row">
+          <div><label>Reward Token Address</label><input id="tsRewardToken" placeholder="0x..." /></div>
+          <div><label>Reward per completion USDC (min 5)</label><input id="tsRewardUsdc" type="number" min="5" step="0.01" value="5" /></div>
+        </div>
+        <label>USDC Value (min 1)</label><input id="tsUsdc" type="number" min="1" step="0.01" value="1" />
+      </div>
+
       <button id="runBtn">Approve + Charge + Execute</button>
+      <div class="muted">No JSON editing needed — payload is generated automatically.</div>
       <div id="status"></div>
     </div>
 

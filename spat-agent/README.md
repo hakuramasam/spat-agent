@@ -176,6 +176,16 @@ Backend now executes and persists artifacts per paid action:
 - Requires `payment.usdcValue >= 1`
 - Requires `reward.usdcValuePerCompletion >= 5`
 
+### UI/UX mode (no JSON editing)
+
+Frontend now provides dedicated form-driven tabs for all three actions:
+
+- Build app/website/game on Base
+- Create token on Base
+- Create social-growth task campaign
+
+Users just fill fields and click **Approve + Charge + Execute**. Payload JSON is generated automatically.
+
 ### Real integration config
 
 Add in backend `.env`:
