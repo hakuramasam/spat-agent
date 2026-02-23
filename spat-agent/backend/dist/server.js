@@ -8,7 +8,7 @@ import { Redis } from "ioredis";
 import { RedisStore } from "connect-redis";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
-const { SESSION_SECRET, NODE_ENV, CHAIN_ID, RPC_URL, USAGE_CONTRACT, SPAT_TOKEN, ALLOWED_ORIGIN, REDIS_URL, PORT } = process.env;
+const { SESSION_SECRET, NODE_ENV, CHAIN_ID, RPC_URL, USAGE_CONTRACT, SPAT_TOKEN, ALLOWED_ORIGIN, REDIS_URL, PORT, REQUEST_TIMEOUT_MS, WORKFLOW_DEFAULT_WEBHOOK, SERVICE_MAP_JSON } = process.env;
 if (!SESSION_SECRET)
     throw new Error("SESSION_SECRET is required");
 if (!CHAIN_ID)
@@ -20,7 +20,8 @@ if (!USAGE_CONTRACT)
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 const app = express();
 app.set("trust proxy", 1);
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+const timeoutMs = Number(REQUEST_TIMEOUT_MS || 20000);
 const dataDir = path.join(process.cwd(), "data");
 const dbPath = path.join(dataDir, "runtime-db.json");
 const defaultDb = {
@@ -29,6 +30,17 @@ const defaultDb = {
     serviceRuns: [],
     jobs: []
 };
+const serviceMap = (() => {
+    if (!SERVICE_MAP_JSON)
+        return {};
+    try {
+        return JSON.parse(SERVICE_MAP_JSON);
+    }
+    catch {
+        console.warn("Invalid SERVICE_MAP_JSON, ignoring");
+        return {};
+    }
+})();
 async function loadDb() {
     await mkdir(dataDir, { recursive: true });
     try {
@@ -51,6 +63,141 @@ async function saveDb(db) {
 }
 function newId(prefix) {
     return `${prefix}_${randomBytes(8).toString("hex")}`;
+}
+async function doHttpCall(input) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(input.url, {
+            method: input.method || "POST",
+            headers: {
+                "content-type": "application/json",
+                ...(input.headers || {})
+            },
+            body: input.body === undefined ? undefined : JSON.stringify(input.body),
+            signal: controller.signal
+        });
+        const text = await res.text();
+        let parsed = text;
+        try {
+            parsed = JSON.parse(text);
+        }
+        catch {
+            // keep as text
+        }
+        return {
+            ok: res.ok,
+            status: res.status,
+            data: parsed
+        };
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
+async function runWorkflowIntegration(user, payload) {
+    const runName = payload?.name || "default-workflow";
+    const steps = (payload?.steps || []);
+    const effectiveSteps = steps.length > 0
+        ? steps
+        : WORKFLOW_DEFAULT_WEBHOOK
+            ? [
+                {
+                    type: "webhook",
+                    url: WORKFLOW_DEFAULT_WEBHOOK,
+                    method: "POST",
+                    body: {
+                        user,
+                        workflow: runName,
+                        input: payload?.input || {},
+                        timestamp: new Date().toISOString()
+                    }
+                }
+            ]
+            : [];
+    if (effectiveSteps.length === 0) {
+        throw new Error("No workflow steps provided and WORKFLOW_DEFAULT_WEBHOOK not configured");
+    }
+    const stepResults = [];
+    for (const [index, step] of effectiveSteps.entries()) {
+        const result = await doHttpCall({
+            url: step.url,
+            method: step.method || "POST",
+            headers: step.headers,
+            body: step.body ?? {
+                user,
+                workflow: runName,
+                input: payload?.input || {},
+                step: index + 1
+            }
+        });
+        stepResults.push({
+            step: index + 1,
+            url: step.url,
+            status: result.status,
+            ok: result.ok,
+            response: result.data
+        });
+        if (!result.ok) {
+            throw new Error(`Workflow step ${index + 1} failed with status ${result.status}`);
+        }
+    }
+    return {
+        summary: `Workflow ${runName} executed`,
+        stepsExecuted: effectiveSteps.length,
+        stepResults
+    };
+}
+async function runServiceIntegration(user, payload) {
+    const serviceName = String(payload?.service || "").trim();
+    if (!serviceName)
+        throw new Error("payload.service is required for useService");
+    if (serviceName === "webhook") {
+        if (!payload?.params?.url)
+            throw new Error("payload.params.url is required for webhook service");
+        const result = await doHttpCall({
+            url: payload.params.url,
+            method: payload?.params?.method || "POST",
+            headers: payload?.params?.headers,
+            body: payload?.params?.body ?? { user, params: payload?.params }
+        });
+        if (!result.ok)
+            throw new Error(`Service webhook failed with status ${result.status}`);
+        return {
+            service: serviceName,
+            status: result.status,
+            response: result.data
+        };
+    }
+    const cfg = serviceMap[serviceName];
+    if (!cfg) {
+        throw new Error(`Unknown service '${serviceName}'. Configure SERVICE_MAP_JSON or use service='webhook'`);
+    }
+    const authHeaderValue = cfg.authHeaderEnv ? process.env[cfg.authHeaderEnv] : undefined;
+    const headers = {
+        ...(cfg.headers || {}),
+        ...(payload?.params?.headers || {})
+    };
+    if (cfg.authHeaderEnv && authHeaderValue) {
+        headers.authorization = authHeaderValue;
+    }
+    const result = await doHttpCall({
+        url: cfg.url,
+        method: cfg.method || "POST",
+        headers,
+        body: {
+            user,
+            service: serviceName,
+            ...(payload?.params || {})
+        }
+    });
+    if (!result.ok)
+        throw new Error(`Service '${serviceName}' failed with status ${result.status}`);
+    return {
+        service: serviceName,
+        status: result.status,
+        response: result.data
+    };
 }
 const sessionConfig = {
     secret: SESSION_SECRET,
@@ -140,25 +287,21 @@ async function executeAction(user, action, payload) {
         };
         db.workflowRuns.push(run);
         await saveDb(db);
-        setTimeout(async () => {
-            const nextDb = await loadDb();
-            const target = nextDb.workflowRuns.find((r) => r.id === run.id);
-            if (!target)
-                return;
+        const result = await runWorkflowIntegration(user, payload);
+        const nextDb = await loadDb();
+        const target = nextDb.workflowRuns.find((r) => r.id === run.id);
+        if (target) {
             target.status = "done";
             target.updatedAt = new Date().toISOString();
-            target.result = {
-                summary: `Workflow ${target.name} completed`,
-                stepsExecuted: 3
-            };
+            target.result = result;
             await saveDb(nextDb);
-        }, 1200);
-        return { type: "workflowRun", id: run.id, data: run };
+        }
+        return { type: "workflowRun", id: run.id, data: target || run };
     }
     const service = {
         id: newId("svc"),
         user,
-        service: payload?.service || "default-service",
+        service: payload?.service || "",
         params: payload?.params,
         status: "running",
         createdAt: now,
@@ -166,19 +309,16 @@ async function executeAction(user, action, payload) {
     };
     db.serviceRuns.push(service);
     await saveDb(db);
-    setTimeout(async () => {
-        const nextDb = await loadDb();
-        const target = nextDb.serviceRuns.find((r) => r.id === service.id);
-        if (!target)
-            return;
+    const output = await runServiceIntegration(user, payload);
+    const nextDb = await loadDb();
+    const target = nextDb.serviceRuns.find((r) => r.id === service.id);
+    if (target) {
         target.status = "done";
         target.updatedAt = new Date().toISOString();
-        target.output = {
-            message: `Service ${target.service} executed successfully`
-        };
+        target.output = output;
         await saveDb(nextDb);
-    }, 900);
-    return { type: "serviceRun", id: service.id, data: service };
+    }
+    return { type: "serviceRun", id: service.id, data: target || service };
 }
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.get("/auth/nonce", authLimiter, (req, res) => {

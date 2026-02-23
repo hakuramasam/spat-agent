@@ -156,8 +156,29 @@ Stop services:
 Backend now executes and persists artifacts per paid action:
 
 - `makeTask` → creates task record
-- `runWorkflow` → creates workflow run, then marks done with result
-- `useService` → creates service run, then marks done with output
+- `runWorkflow` → executes real HTTP/webhook steps and stores result
+- `useService` → calls real service integrations (webhook or configured service map)
+
+### Real integration config
+
+Add in backend `.env`:
+
+- `WORKFLOW_DEFAULT_WEBHOOK` (optional fallback endpoint for workflow runs)
+- `SERVICE_MAP_JSON` for named service integrations
+- `REQUEST_TIMEOUT_MS` for outbound request timeout
+
+`SERVICE_MAP_JSON` example:
+
+```json
+{
+  "notifier": { "url": "https://example.com/notify", "method": "POST" },
+  "crm": {
+    "url": "https://example.com/crm/sync",
+    "method": "POST",
+    "authHeaderEnv": "CRM_BEARER_TOKEN"
+  }
+}
+```
 
 New authenticated endpoints:
 
