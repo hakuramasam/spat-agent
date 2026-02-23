@@ -13,6 +13,7 @@ let signer;
 let address;
 let usageContractAddress = cfg.USAGE_CONTRACT || "";
 let currentAction = "runWorkflow";
+let busy = false;
 
 const statusEl = document.getElementById("status");
 const authStateEl = document.getElementById("authState");
@@ -50,11 +51,19 @@ function setupTabs() {
   });
 }
 
+async function ensureCorrectChain() {
+  const net = await provider.getNetwork();
+  if (Number(net.chainId) !== CHAIN_ID) {
+    throw new Error(`Wrong network. Please switch wallet to chainId ${CHAIN_ID}.`);
+  }
+}
+
 async function connectWallet() {
   if (!window.ethereum) throw new Error("No wallet found");
   provider = new ethers.BrowserProvider(window.ethereum);
   await provider.send("eth_requestAccounts", []);
   signer = await provider.getSigner();
+  await ensureCorrectChain();
   address = await signer.getAddress();
   addressEl.textContent = address;
 }
@@ -84,6 +93,7 @@ async function loadQuote() {
   if (!r.ok) throw new Error("quote failed");
   const data = await r.json();
   usageContractAddress = data.usageContract;
+  if (!usageContractAddress) throw new Error("Missing usage contract address in backend quote");
   return data.actionCosts;
 }
 
@@ -205,6 +215,11 @@ async function refreshHistory() {
 }
 
 async function runFlow() {
+  if (busy) return;
+  busy = true;
+  const runBtn = document.getElementById("runBtn");
+  runBtn.disabled = true;
+
   try {
     setTimeline("validate");
     const check = validateCurrentForm();
@@ -213,6 +228,7 @@ async function runFlow() {
     setTimeline("connect");
     setStatus("Connecting wallet...");
     if (!signer) await connectWallet();
+    await ensureCorrectChain();
 
     setTimeline("auth");
     setStatus("Signing SIWE login...");
@@ -223,6 +239,8 @@ async function runFlow() {
 
     const action = currentAction;
     const amount = costs[action];
+    if (!amount) throw new Error(`No configured cost for action '${action}'`);
+
     const actionType = actionToType(action);
     const requestId = randomRequestId();
     const payload = buildPayload();
@@ -257,6 +275,9 @@ async function runFlow() {
     await refreshHistory();
   } catch (e) {
     setStatus(e.message || "Flow failed", true);
+  } finally {
+    busy = false;
+    runBtn.disabled = false;
   }
 }
 

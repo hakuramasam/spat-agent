@@ -57,6 +57,7 @@ type WorkflowRun = {
   createdAt: string;
   updatedAt: string;
   result?: Record<string, unknown>;
+  error?: string;
 };
 
 type ServiceRun = {
@@ -68,6 +69,7 @@ type ServiceRun = {
   createdAt: string;
   updatedAt: string;
   output?: Record<string, unknown>;
+  error?: string;
 };
 
 type JobRecord = {
@@ -488,18 +490,28 @@ async function executeAction(user: string, action: Action, payload: any) {
     db.workflowRuns.push(run);
     await saveDb(db);
 
-    const result = await runWorkflowIntegration(user, payload);
-
-    const nextDb = await loadDb();
-    const target = nextDb.workflowRuns.find((r) => r.id === run.id);
-    if (target) {
-      target.status = "done";
-      target.updatedAt = new Date().toISOString();
-      target.result = result;
-      await saveDb(nextDb);
+    try {
+      const result = await runWorkflowIntegration(user, payload);
+      const nextDb = await loadDb();
+      const target = nextDb.workflowRuns.find((r) => r.id === run.id);
+      if (target) {
+        target.status = "done";
+        target.updatedAt = new Date().toISOString();
+        target.result = result;
+        await saveDb(nextDb);
+      }
+      return { type: "workflowRun", id: run.id, data: target || run };
+    } catch (error: any) {
+      const nextDb = await loadDb();
+      const target = nextDb.workflowRuns.find((r) => r.id === run.id);
+      if (target) {
+        target.status = "failed";
+        target.updatedAt = new Date().toISOString();
+        target.error = String(error?.message || error || "workflow_failed");
+        await saveDb(nextDb);
+      }
+      throw error;
     }
-
-    return { type: "workflowRun", id: run.id, data: target || run };
   }
 
   const service: ServiceRun = {
@@ -514,18 +526,28 @@ async function executeAction(user: string, action: Action, payload: any) {
   db.serviceRuns.push(service);
   await saveDb(db);
 
-  const output = await runServiceIntegration(user, payload);
-
-  const nextDb = await loadDb();
-  const target = nextDb.serviceRuns.find((r) => r.id === service.id);
-  if (target) {
-    target.status = "done";
-    target.updatedAt = new Date().toISOString();
-    target.output = output;
-    await saveDb(nextDb);
+  try {
+    const output = await runServiceIntegration(user, payload);
+    const nextDb = await loadDb();
+    const target = nextDb.serviceRuns.find((r) => r.id === service.id);
+    if (target) {
+      target.status = "done";
+      target.updatedAt = new Date().toISOString();
+      target.output = output;
+      await saveDb(nextDb);
+    }
+    return { type: "serviceRun", id: service.id, data: target || service };
+  } catch (error: any) {
+    const nextDb = await loadDb();
+    const target = nextDb.serviceRuns.find((r) => r.id === service.id);
+    if (target) {
+      target.status = "failed";
+      target.updatedAt = new Date().toISOString();
+      target.error = String(error?.message || error || "service_failed");
+      await saveDb(nextDb);
+    }
+    throw error;
   }
-
-  return { type: "serviceRun", id: service.id, data: target || service };
 }
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
