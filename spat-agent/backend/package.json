@@ -1,17 +1,20 @@
 {
   "name": "spat-agent-backend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "start": "node --enable-source-maps dist/server.js",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js"
   },
   "dependencies": {
+    "connect-redis": "^8.0.1",
     "ethers": "^6.13.2",
     "express": "^4.19.2",
+    "express-rate-limit": "^7.4.1",
     "express-session": "^1.18.0",
+    "ioredis": "^5.4.1",
     "siwe": "^3.0.0"
   },
   "devDependencies": {

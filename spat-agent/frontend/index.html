@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SPAT Agent</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 32px; max-width: 780px; }
+      button, select { padding: 8px 12px; margin: 4px 0; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+      code { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; }
+      .ok { color: #0a7c2f; }
+      .err { color: #ad2121; }
+    </style>
+  </head>
+  <body>
+    <h1>SPAT Agent</h1>
+    <div class="card">
+      <button id="connectBtn">Connect Wallet</button>
+      <div>Address: <code id="address">-</code></div>
+      <div>Auth: <span id="authState">not logged in</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Usage</h3>
+      <label>Action:</label>
+      <select id="action">
+        <option value="makeTask">makeTask (1 SPAT)</option>
+        <option value="runWorkflow">runWorkflow (3 SPAT)</option>
+        <option value="useService">useService (0.5 SPAT)</option>
+      </select>
+      <br />
+      <button id="runBtn">Approve + Charge + Execute</button>
+      <div id="status"></div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

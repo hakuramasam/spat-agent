@@ -69,8 +69,52 @@ cast send 0x7f18bdbe376b3b0648ad75da2fcc52f8c107bcdf \
 
 - SIWE verification is now real (signature + nonce + chain check).
 - Session cookies hardened (`httpOnly`, `sameSite`, production `secure`).
-- Usage execution now verifies on-chain `Charged` event before queueing work.
+- Optional Redis session store (`REDIS_URL`) for production durability.
+- Rate limiting added for `/auth/*` and `/usage/*` endpoints.
+- Usage execution verifies on-chain `Charged` event before queueing work.
 - Action + amount + requestId + user address are validated against receipt logs.
+
+## New implementation: frontend + deployment scripts
+
+- `frontend/index.html` + `frontend/main.js`
+  - Connect wallet
+  - SIWE sign-in
+  - `approve()` for SPAT
+  - `charge()` on usage contract
+  - backend payment confirmation (`/usage/execute`)
+
+- `onchain/*` (Hardhat)
+  - compile contracts from `../contracts`
+  - deploy treasury + usage contracts
+  - prints funding command for 500,000 SPAT transfer
+
+### Quick run
+
+Backend:
+
+```bash
+cd backend
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Frontend (static):
+
+```bash
+cd frontend
+python3 -m http.server 3000
+```
+
+Onchain deployment:
+
+```bash
+cd onchain
+npm install
+cp .env.example .env
+npm run build
+npm run deploy
+```
 
 ## Security notes
 

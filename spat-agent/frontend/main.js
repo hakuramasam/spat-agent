@@ -1,0 +1,117 @@
+import { ethers } from "https://esm.sh/ethers@6.13.2";
+
+const BACKEND = "http://localhost:8787";
+const SPAT_TOKEN = "0x7f18bdbe376b3b0648ad75da2fcc52f8c107bcdf";
+const CHAIN_ID = 1;
+
+const erc20Abi = ["function approve(address spender,uint256 amount) external returns (bool)"];
+const usageAbi = ["function charge(uint8 actionType, bytes32 requestId) external"];
+
+let provider;
+let signer;
+let address;
+let usageContractAddress;
+
+const statusEl = document.getElementById("status");
+const authStateEl = document.getElementById("authState");
+const addressEl = document.getElementById("address");
+
+function setStatus(msg, err = false) {
+  statusEl.className = err ? "err" : "ok";
+  statusEl.textContent = msg;
+}
+
+async function connectWallet() {
+  if (!window.ethereum) throw new Error("No wallet found");
+  provider = new ethers.BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+  signer = await provider.getSigner();
+  address = await signer.getAddress();
+  addressEl.textContent = address;
+}
+
+async function siweLogin() {
+  const nonceRes = await fetch(`${BACKEND}/auth/nonce`, { credentials: "include" });
+  const { nonce } = await nonceRes.json();
+
+  const domain = window.location.host;
+  const origin = window.location.origin;
+  const msg = `${domain} wants you to sign in with your Ethereum account:\n${address}\n\nSign in to SPAT Agent\n\nURI: ${origin}\nVersion: 1\nChain ID: ${CHAIN_ID}\nNonce: ${nonce}\nIssued At: ${new Date().toISOString()}`;
+
+  const signature = await signer.signMessage(msg);
+  const verify = await fetch(`${BACKEND}/auth/verify`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: msg, signature })
+  });
+
+  if (!verify.ok) throw new Error("SIWE verify failed");
+  authStateEl.textContent = "authenticated";
+}
+
+async function loadQuote() {
+  const r = await fetch(`${BACKEND}/usage/quote`, { credentials: "include" });
+  if (!r.ok) throw new Error("quote failed");
+  const data = await r.json();
+  usageContractAddress = data.usageContract;
+  return data.actionCosts;
+}
+
+function randomRequestId() {
+  return ethers.hexlify(ethers.randomBytes(32));
+}
+
+function actionToType(action) {
+  if (action === "makeTask") return 0;
+  if (action === "runWorkflow") return 1;
+  return 2;
+}
+
+async function runFlow() {
+  try {
+    setStatus("Connecting wallet...");
+    if (!signer) await connectWallet();
+
+    setStatus("Signing SIWE login...");
+    await siweLogin();
+
+    setStatus("Loading quote...");
+    const costs = await loadQuote();
+
+    const action = document.getElementById("action").value;
+    const amount = costs[action];
+    const actionType = actionToType(action);
+    const requestId = randomRequestId();
+
+    setStatus("Requesting approve() signature...");
+    const token = new ethers.Contract(SPAT_TOKEN, erc20Abi, signer);
+    const approveTx = await token.approve(usageContractAddress, amount);
+    await approveTx.wait();
+
+    setStatus("Charging in SPAT on-chain...");
+    const usage = new ethers.Contract(usageContractAddress, usageAbi, signer);
+    const chargeTx = await usage.charge(actionType, requestId);
+    const rcpt = await chargeTx.wait();
+
+    setStatus("Verifying payment + queueing task...");
+    const execRes = await fetch(`${BACKEND}/usage/execute`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ txHash: rcpt.hash, action, requestId })
+    });
+
+    if (!execRes.ok) {
+      const e = await execRes.json().catch(() => ({}));
+      throw new Error(e.error || "execute failed");
+    }
+
+    setStatus("Done: payment verified, task queued ✅");
+  } catch (e) {
+    setStatus(e.message || "Flow failed", true);
+  }
+}
+
+document.getElementById("connectBtn").addEventListener("click", connectWallet);
+document.getElementById("runBtn").addEventListener("click", runFlow);
