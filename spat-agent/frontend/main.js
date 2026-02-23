@@ -96,11 +96,15 @@ async function runFlow() {
     const rcpt = await chargeTx.wait();
 
     setStatus("Verifying payment + queueing task...");
+    let payload;
+    const payloadRaw = document.getElementById("payload").value?.trim();
+    if (payloadRaw) payload = JSON.parse(payloadRaw);
+
     const execRes = await fetch(`${BACKEND}/usage/execute`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ txHash: rcpt.hash, action, requestId })
+      body: JSON.stringify({ txHash: rcpt.hash, action, requestId, payload })
     });
 
     if (!execRes.ok) {

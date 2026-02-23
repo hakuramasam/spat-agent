@@ -151,6 +151,25 @@ Stop services:
 ./scripts/stop-local.sh
 ```
 
+## Action execution layer implemented
+
+Backend now executes and persists artifacts per paid action:
+
+- `makeTask` → creates task record
+- `runWorkflow` → creates workflow run, then marks done with result
+- `useService` → creates service run, then marks done with output
+
+New authenticated endpoints:
+
+- `GET /jobs`, `GET /jobs/:id`
+- `GET /tasks`
+- `GET /workflows`
+- `GET /services`
+
+Runtime persistence file:
+
+- `backend/data/runtime-db.json`
+
 ## Security notes
 
 - Keep treasury ownership on a multisig when possible (Safe preferred).

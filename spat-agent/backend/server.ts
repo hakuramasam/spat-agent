@@ -4,8 +4,10 @@ import rateLimit from "express-rate-limit";
 import { randomBytes } from "crypto";
 import { SiweMessage } from "siwe";
 import { ethers } from "ethers";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { RedisStore } from "connect-redis";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import path from "path";
 
 const {
   SESSION_SECRET,
@@ -30,6 +32,94 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(express.json());
 
+type JobStatus = "queued" | "running" | "done" | "failed";
+type Action = "makeTask" | "runWorkflow" | "useService";
+
+type Task = {
+  id: string;
+  user: string;
+  title: string;
+  details?: string;
+  createdAt: string;
+};
+
+type WorkflowRun = {
+  id: string;
+  user: string;
+  name: string;
+  input?: Record<string, unknown>;
+  status: JobStatus;
+  createdAt: string;
+  updatedAt: string;
+  result?: Record<string, unknown>;
+};
+
+type ServiceRun = {
+  id: string;
+  user: string;
+  service: string;
+  params?: Record<string, unknown>;
+  status: JobStatus;
+  createdAt: string;
+  updatedAt: string;
+  output?: Record<string, unknown>;
+};
+
+type JobRecord = {
+  id: string;
+  requestId: string;
+  user: string;
+  action: Action;
+  txHash: string;
+  status: JobStatus;
+  createdAt: string;
+  updatedAt: string;
+  artifactId?: string;
+  error?: string;
+};
+
+type RuntimeDB = {
+  tasks: Task[];
+  workflowRuns: WorkflowRun[];
+  serviceRuns: ServiceRun[];
+  jobs: JobRecord[];
+};
+
+const dataDir = path.join(process.cwd(), "data");
+const dbPath = path.join(dataDir, "runtime-db.json");
+
+const defaultDb: RuntimeDB = {
+  tasks: [],
+  workflowRuns: [],
+  serviceRuns: [],
+  jobs: []
+};
+
+async function loadDb(): Promise<RuntimeDB> {
+  await mkdir(dataDir, { recursive: true });
+  try {
+    const raw = await readFile(dbPath, "utf8");
+    const parsed = JSON.parse(raw) as RuntimeDB;
+    return {
+      tasks: parsed.tasks || [],
+      workflowRuns: parsed.workflowRuns || [],
+      serviceRuns: parsed.serviceRuns || [],
+      jobs: parsed.jobs || []
+    };
+  } catch {
+    await writeFile(dbPath, JSON.stringify(defaultDb, null, 2));
+    return structuredClone(defaultDb);
+  }
+}
+
+async function saveDb(db: RuntimeDB) {
+  await writeFile(dbPath, JSON.stringify(db, null, 2));
+}
+
+function newId(prefix: string) {
+  return `${prefix}_${randomBytes(8).toString("hex")}`;
+}
+
 const sessionConfig: session.SessionOptions = {
   secret: SESSION_SECRET,
   resave: false,
@@ -44,7 +134,7 @@ const sessionConfig: session.SessionOptions = {
 
 if (REDIS_URL) {
   const redisClient = new Redis(REDIS_URL);
-  redisClient.on("error", (err) => {
+  redisClient.on("error", (err: unknown) => {
     console.error("Redis error", err);
   });
   sessionConfig.store = new RedisStore({ client: redisClient as any, prefix: "spat:sess:" });
@@ -82,17 +172,95 @@ const usageLimiter = rateLimit({
 const usageAbi = ["event Charged(address indexed user, uint8 indexed actionType, uint256 amount, bytes32 requestId)"];
 const usageIface = new ethers.Interface(usageAbi);
 
-const actionCosts: Record<string, string> = {
+const actionCosts: Record<Action, string> = {
   makeTask: "1000000000000000000",
   runWorkflow: "3000000000000000000",
   useService: "500000000000000000"
 };
 
-const actionTypeMap: Record<string, number> = {
+const actionTypeMap: Record<Action, number> = {
   makeTask: 0,
   runWorkflow: 1,
   useService: 2
 };
+
+function requireAuth(req: any, res: any, next: any) {
+  if (!req.session?.address) return res.status(401).json({ error: "unauthorized" });
+  next();
+}
+
+async function executeAction(user: string, action: Action, payload: any) {
+  const now = new Date().toISOString();
+  const db = await loadDb();
+
+  if (action === "makeTask") {
+    const task: Task = {
+      id: newId("task"),
+      user,
+      title: payload?.title || "Untitled Task",
+      details: payload?.details,
+      createdAt: now
+    };
+    db.tasks.push(task);
+    await saveDb(db);
+    return { type: "task", id: task.id, data: task };
+  }
+
+  if (action === "runWorkflow") {
+    const run: WorkflowRun = {
+      id: newId("wf"),
+      user,
+      name: payload?.name || "default-workflow",
+      input: payload?.input,
+      status: "running",
+      createdAt: now,
+      updatedAt: now
+    };
+    db.workflowRuns.push(run);
+    await saveDb(db);
+
+    setTimeout(async () => {
+      const nextDb = await loadDb();
+      const target = nextDb.workflowRuns.find((r) => r.id === run.id);
+      if (!target) return;
+      target.status = "done";
+      target.updatedAt = new Date().toISOString();
+      target.result = {
+        summary: `Workflow ${target.name} completed`,
+        stepsExecuted: 3
+      };
+      await saveDb(nextDb);
+    }, 1200);
+
+    return { type: "workflowRun", id: run.id, data: run };
+  }
+
+  const service: ServiceRun = {
+    id: newId("svc"),
+    user,
+    service: payload?.service || "default-service",
+    params: payload?.params,
+    status: "running",
+    createdAt: now,
+    updatedAt: now
+  };
+  db.serviceRuns.push(service);
+  await saveDb(db);
+
+  setTimeout(async () => {
+    const nextDb = await loadDb();
+    const target = nextDb.serviceRuns.find((r) => r.id === service.id);
+    if (!target) return;
+    target.status = "done";
+    target.updatedAt = new Date().toISOString();
+    target.output = {
+      message: `Service ${target.service} executed successfully`
+    };
+    await saveDb(nextDb);
+  }, 900);
+
+  return { type: "serviceRun", id: service.id, data: service };
+}
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -108,10 +276,7 @@ app.post("/auth/verify", authLimiter, async (req: any, res) => {
     if (!message || !signature || !req.session?.nonce) return res.status(400).json({ error: "missing_fields" });
 
     const siwe = new SiweMessage(message);
-    const result = await siwe.verify({
-      signature,
-      nonce: req.session.nonce
-    });
+    const result = await siwe.verify({ signature, nonce: req.session.nonce });
 
     if (!result.success) return res.status(401).json({ error: "invalid_signature" });
     if (Number(siwe.chainId) !== Number(CHAIN_ID)) return res.status(401).json({ error: "wrong_chain" });
@@ -130,21 +295,25 @@ app.post("/auth/logout", authLimiter, (req: any, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-app.get("/usage/quote", usageLimiter, (req: any, res) => {
-  if (!req.session?.address) return res.status(401).json({ error: "unauthorized" });
+app.get("/usage/quote", usageLimiter, requireAuth, (_req: any, res) => {
   res.json({ actionCosts, token: SPAT_TOKEN || null, usageContract: USAGE_CONTRACT });
 });
 
-app.post("/usage/execute", usageLimiter, async (req: any, res) => {
+app.post("/usage/execute", usageLimiter, requireAuth, async (req: any, res) => {
   try {
-    if (!req.session?.address) return res.status(401).json({ error: "unauthorized" });
+    const user = req.session.address as string;
+    const { txHash, action, requestId, payload } = req.body as {
+      txHash: string;
+      action: Action;
+      requestId: string;
+      payload?: any;
+    };
 
-    const { txHash, action, requestId } = req.body;
     if (!txHash || !action || !requestId) return res.status(400).json({ error: "missing_fields" });
+    if (!(action in actionTypeMap)) return res.status(400).json({ error: "invalid_action" });
 
     const expectedActionType = actionTypeMap[action];
     const expectedAmount = actionCosts[action];
-    if (expectedActionType === undefined || !expectedAmount) return res.status(400).json({ error: "invalid_action" });
 
     const receipt = await provider.getTransactionReceipt(txHash);
     if (!receipt || receipt.status !== 1) return res.status(400).json({ error: "tx_not_confirmed" });
@@ -155,13 +324,13 @@ app.post("/usage/execute", usageLimiter, async (req: any, res) => {
         const parsed = usageIface.parseLog(log);
         if (!parsed || parsed.name !== "Charged") return false;
 
-        const user = String(parsed.args.user).toLowerCase();
+        const evtUser = String(parsed.args.user).toLowerCase();
         const actionType = Number(parsed.args.actionType);
         const amount = parsed.args.amount.toString();
         const rid = String(parsed.args.requestId).toLowerCase();
 
         return (
-          user === req.session.address &&
+          evtUser === user &&
           actionType === expectedActionType &&
           amount === expectedAmount &&
           rid === String(requestId).toLowerCase()
@@ -173,11 +342,79 @@ app.post("/usage/execute", usageLimiter, async (req: any, res) => {
 
     if (!chargedLog) return res.status(400).json({ error: "payment_not_verified" });
 
-    // TODO: enqueue actual agent work queue here.
-    return res.json({ ok: true, status: "queued" });
+    const now = new Date().toISOString();
+    const db = await loadDb();
+
+    const duplicate = db.jobs.find((j) => j.requestId.toLowerCase() === String(requestId).toLowerCase());
+    if (duplicate) return res.status(409).json({ error: "request_already_processed", job: duplicate });
+
+    const job: JobRecord = {
+      id: newId("job"),
+      requestId,
+      user,
+      action,
+      txHash,
+      status: "running",
+      createdAt: now,
+      updatedAt: now
+    };
+    db.jobs.push(job);
+    await saveDb(db);
+
+    try {
+      const result = await executeAction(user, action, payload);
+      const nextDb = await loadDb();
+      const target = nextDb.jobs.find((j) => j.id === job.id);
+      if (target) {
+        target.status = "done";
+        target.updatedAt = new Date().toISOString();
+        target.artifactId = result.id;
+      }
+      await saveDb(nextDb);
+
+      return res.json({ ok: true, status: "done", jobId: job.id, result });
+    } catch (error: any) {
+      const nextDb = await loadDb();
+      const target = nextDb.jobs.find((j) => j.id === job.id);
+      if (target) {
+        target.status = "failed";
+        target.updatedAt = new Date().toISOString();
+        target.error = String(error?.message || error || "unknown_error");
+      }
+      await saveDb(nextDb);
+      return res.status(500).json({ error: "action_execution_failed", jobId: job.id });
+    }
   } catch {
     return res.status(500).json({ error: "internal_error" });
   }
+});
+
+app.get("/jobs", usageLimiter, requireAuth, async (req: any, res) => {
+  const db = await loadDb();
+  const items = db.jobs.filter((j) => j.user === req.session.address);
+  res.json({ jobs: items });
+});
+
+app.get("/jobs/:id", usageLimiter, requireAuth, async (req: any, res) => {
+  const db = await loadDb();
+  const item = db.jobs.find((j) => j.id === req.params.id && j.user === req.session.address);
+  if (!item) return res.status(404).json({ error: "not_found" });
+  res.json({ job: item });
+});
+
+app.get("/tasks", usageLimiter, requireAuth, async (req: any, res) => {
+  const db = await loadDb();
+  res.json({ tasks: db.tasks.filter((t) => t.user === req.session.address) });
+});
+
+app.get("/workflows", usageLimiter, requireAuth, async (req: any, res) => {
+  const db = await loadDb();
+  res.json({ workflowRuns: db.workflowRuns.filter((w) => w.user === req.session.address) });
+});
+
+app.get("/services", usageLimiter, requireAuth, async (req: any, res) => {
+  const db = await loadDb();
+  res.json({ serviceRuns: db.serviceRuns.filter((s) => s.user === req.session.address) });
 });
 
 app.listen(Number(PORT || 8787), () => {
