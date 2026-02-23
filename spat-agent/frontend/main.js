@@ -1,8 +1,9 @@
 import { ethers } from "https://esm.sh/ethers@6.13.2";
 
-const BACKEND = "http://localhost:8787";
-const SPAT_TOKEN = "0x7f18bdbe376b3b0648ad75da2fcc52f8c107bcdf";
-const CHAIN_ID = 1;
+const cfg = window.SPAT_CONFIG || {};
+const BACKEND = cfg.BACKEND || "http://localhost:8787";
+const SPAT_TOKEN = cfg.SPAT_TOKEN || "0x7f18bdbe376b3b0648ad75da2fcc52f8c107bcdf";
+const CHAIN_ID = Number(cfg.CHAIN_ID || 1);
 
 const erc20Abi = ["function approve(address spender,uint256 amount) external returns (bool)"];
 const usageAbi = ["function charge(uint8 actionType, bytes32 requestId) external"];
@@ -10,7 +11,7 @@ const usageAbi = ["function charge(uint8 actionType, bytes32 requestId) external
 let provider;
 let signer;
 let address;
-let usageContractAddress;
+let usageContractAddress = cfg.USAGE_CONTRACT || "";
 
 const statusEl = document.getElementById("status");
 const authStateEl = document.getElementById("authState");

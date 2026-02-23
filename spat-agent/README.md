@@ -103,6 +103,7 @@ Frontend (static):
 
 ```bash
 cd frontend
+cp config.example.js config.js
 python3 -m http.server 3000
 ```
 
@@ -114,6 +115,40 @@ npm install
 cp .env.example .env
 npm run build
 npm run deploy
+```
+
+## Final step implementation (wired runtime)
+
+1) Deploy contracts with `onchain/` and copy the deployed `SPATAgentUsage` address.
+
+2) Set backend runtime vars:
+
+```bash
+cd backend
+cp .env.production.example .env
+# edit CHAIN_ID, RPC_URL, USAGE_CONTRACT, ALLOWED_ORIGIN, SESSION_SECRET, REDIS_URL
+```
+
+3) Set frontend runtime vars:
+
+```bash
+cd frontend
+cp config.example.js config.js
+# edit BACKEND, CHAIN_ID, USAGE_CONTRACT
+```
+
+4) Start both with one command:
+
+```bash
+cd ..
+chmod +x scripts/start-local.sh scripts/stop-local.sh
+./scripts/start-local.sh
+```
+
+Stop services:
+
+```bash
+./scripts/stop-local.sh
 ```
 
 ## Security notes
