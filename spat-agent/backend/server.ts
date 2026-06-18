@@ -21,7 +21,10 @@ const {
   PORT,
   REQUEST_TIMEOUT_MS,
   WORKFLOW_DEFAULT_WEBHOOK,
-  SERVICE_MAP_JSON
+  SERVICE_MAP_JSON,
+  OPENROUTER_API_KEY,
+  OPENROUTER_BASE_URL,
+  OPENROUTER_MODEL
 } = process.env;
 
 if (!SESSION_SECRET) throw new Error("SESSION_SECRET is required");
@@ -31,6 +34,52 @@ if (!USAGE_CONTRACT) throw new Error("USAGE_CONTRACT is required");
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 const app = express();
+
+// ── OpenRouter LLM client ───────────────────────────────────────────────────
+const LLM_BASE_URL = OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+const LLM_MODEL = OPENROUTER_MODEL || "openai/gpt-4o-mini";
+
+async function callLLM(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  opts?: { model?: string; temperature?: number; max_tokens?: number }
+): Promise<string> {
+  if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": ALLOWED_ORIGIN || "http://localhost:3000",
+        "X-Title": "SPAT Agent"
+      },
+      body: JSON.stringify({
+        model: opts?.model || LLM_MODEL,
+        messages,
+        temperature: opts?.temperature ?? 0.7,
+        max_tokens: opts?.max_tokens ?? 1024
+      }),
+      signal: controller.signal
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`OpenRouter error ${res.status}: ${errText}`);
+    }
+
+    const data = (await res.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    return data.choices?.[0]?.message?.content ?? "";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
@@ -704,6 +753,79 @@ app.get("/services", usageLimiter, requireAuth, async (req: any, res) => {
   const db = await loadDb();
   res.json({ serviceRuns: db.serviceRuns.filter((s) => s.user === req.session.address) });
 });
+
+// ── LLM / AI endpoints ──────────────────────────────────────────────────────
+
+/** GET /llm/status  – check if the LLM provider is configured */
+app.get("/llm/status", (_req, res) => {
+  res.json({
+    configured: !!OPENROUTER_API_KEY,
+    provider: "openrouter",
+    baseUrl: LLM_BASE_URL,
+    model: LLM_MODEL
+  });
+});
+
+/** POST /llm/chat  – authenticated free-form LLM chat */
+app.post("/llm/chat", usageLimiter, requireAuth, async (req: any, res) => {
+  try {
+    const { messages, model, temperature, max_tokens } = req.body as {
+      messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+      model?: string;
+      temperature?: number;
+      max_tokens?: number;
+    };
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: "messages array is required" });
+    }
+
+    const reply = await callLLM(messages, { model, temperature, max_tokens });
+    return res.json({ ok: true, reply, model: model || LLM_MODEL });
+  } catch (err: any) {
+    console.error("LLM chat error:", err?.message || err);
+    return res.status(500).json({ error: "llm_error", detail: String(err?.message || err) });
+  }
+});
+
+/** POST /llm/assist  – AI helper for building app/token/task payloads from plain English */
+app.post("/llm/assist", usageLimiter, requireAuth, async (req: any, res) => {
+  try {
+    const { intent } = req.body as { intent: string };
+    if (!intent || typeof intent !== "string") {
+      return res.status(400).json({ error: "intent string is required" });
+    }
+
+    const systemPrompt = `You are SPAT Agent, an AI assistant that helps users interact with a
+token-powered agent on Base blockchain. Given a plain-English intent from the user, produce a JSON
+payload for the correct SPAT action. Supported actions:
+
+- runWorkflow: Build web-apps, websites, or games on Base. Payload fields: action, name, objective, appType, features[], input{}, payment{usdcValue}.
+- useService (token-creator): Deploy an ERC-20 token on Base. Payload fields: action, service, params{name,symbol,supply,basedOnProject?}, payment{usdcValue}.
+- makeTask (social-growth): Create a Farcaster/social growth campaign. Payload fields: action, taskType, title, platform, socialAction, target, reward{usdcValuePerCompletion}, payment{usdcValue}.
+
+Respond ONLY with a valid JSON object (no markdown fences) that can be sent directly to /usage/execute as the payload.`;
+
+    const reply = await callLLM([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: intent }
+    ]);
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(reply);
+    } catch {
+      parsed = { rawReply: reply };
+    }
+
+    return res.json({ ok: true, suggestion: parsed });
+  } catch (err: any) {
+    console.error("LLM assist error:", err?.message || err);
+    return res.status(500).json({ error: "llm_error", detail: String(err?.message || err) });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 
 app.get("/catalog/actions", (_req, res) => {
   res.json({
