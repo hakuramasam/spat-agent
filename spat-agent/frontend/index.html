@@ -1,118 +1,272 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SPAT Agent</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 24px; max-width: 980px; }
-      button, select, input, textarea { padding: 8px 10px; margin: 4px 0; width: 100%; box-sizing: border-box; }
-      .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
-      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-      .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+      *, *::before, *::after { box-sizing: border-box; }
+      body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 20px; max-width: 1024px; background: #f8f9fa; color: #111; }
+      h1   { margin: 0 0 20px; font-size: 1.6rem; }
+      h3   { margin: 0 0 10px; font-size: 1rem; }
+      button, select, input, textarea {
+        padding: 8px 12px; margin: 4px 0; width: 100%;
+        border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: #fff;
+      }
+      button { cursor: pointer; background: #111; color: #fff; border: none; font-weight: 600; transition: opacity .15s; }
+      button:hover   { opacity: .85; }
+      button:disabled { opacity: .4; cursor: not-allowed; }
+      .btn-sec { background: #fff; color: #111; border: 1px solid #ccc; font-weight: 500; }
+      .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+      .row  { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+      /* nav tabs */
+      .nav-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
+      .nav-tab  { background: transparent; color: #555; border: 1px solid #ddd; border-radius: 6px 6px 0 0; padding: 6px 14px; width: auto; font-size: 13px; }
+      .nav-tab.active { background: #111; color: #fff; border-color: #111; }
+      /* inner action tabs */
+      .tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 10px; }
+      .tab-btn        { background: #f3f3f3; color: #555; border: 1px solid #ddd; font-size: 13px; }
       .tab-btn.active { background: #111; color: #fff; }
+      /* status */
       .muted { color: #666; font-size: 13px; }
-      .ok { color: #0a7c2f; }
-      .err { color: #ad2121; }
+      .ok    { color: #0a7c2f; }
+      .err   { color: #ad2121; }
+      .warn  { color: #b45e00; }
       .hidden { display: none; }
-      code { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; }
-      .timeline { margin: 8px 0; padding-left: 18px; }
-      .timeline li { margin: 3px 0; }
-      .timeline .done { color: #0a7c2f; }
+      code   { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; font-size: 13px; word-break: break-all; }
+      .timeline    { margin: 8px 0; padding-left: 18px; }
+      .timeline li { margin: 3px 0; font-size: 14px; }
+      .timeline .done    { color: #0a7c2f; }
       .timeline .current { color: #111; font-weight: bold; }
-      .timeline .todo { color: #888; }
-      .history-item { border-top: 1px solid #eee; padding: 8px 0; font-size: 14px; }
-      .pill { display: inline-block; border: 1px solid #ddd; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
-      .validation { font-size: 13px; margin-top: 6px; }
+      .timeline .todo    { color: #888; }
+      .history-item { border-top: 1px solid #eee; padding: 8px 0; font-size: 13px; }
+      .pill { display: inline-block; border: 1px solid #ddd; border-radius: 999px; padding: 2px 8px; font-size: 12px; margin-right: 4px; }
+      .pill.done    { background: #e6f4ea; border-color: #a8d5b0; color: #0a7c2f; }
+      .pill.failed  { background: #fce8e6; border-color: #f5a89e; color: #ad2121; }
+      .pill.running { background: #fff3e0; border-color: #ffcc80; color: #b45e00; }
+      .validation  { font-size: 13px; margin: 6px 0; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-left: 6px; }
+      .badge.green  { background: #e6f4ea; color: #0a7c2f; }
+      .badge.red    { background: #fce8e6; color: #ad2121; }
+      .badge.orange { background: #fff3e0; color: #b45e00; }
+      /* LLM panel */
+      .llm-msgs { max-height: 280px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; margin-bottom: 8px; background: #fafafa; }
+      .llm-msg  { margin: 6px 0; padding: 8px 10px; border-radius: 8px; font-size: 14px; line-height: 1.5; }
+      .llm-msg.user  { background: #111; color: #fff; margin-left: 40px; border-radius: 12px 12px 2px 12px; }
+      .llm-msg.agent { background: #eee; color: #111; margin-right: 40px; border-radius: 12px 12px 12px 2px; }
+      .llm-input-row { display: flex; gap: 8px; }
+      .llm-input-row input  { flex: 1; width: auto; }
+      .llm-input-row button { width: auto; padding: 8px 16px; }
+      /* A2A panel */
+      .a2a-agent-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 8px; font-size: 13px; }
+      .skill-chip { display: inline-block; background: #e8f0fe; color: #1a73e8; border-radius: 4px; padding: 2px 8px; font-size: 12px; margin: 2px; }
+      /* x402 panel */
+      .x402-info { background: #f0f4ff; border: 1px solid #c0d0ff; border-radius: 8px; padding: 12px; font-size: 13px; }
+      pre { background: #f3f3f3; border-radius: 6px; padding: 10px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
     </style>
   </head>
   <body>
-    <h1>SPAT Agent</h1>
+    <h1>SPAT Agent <span class="badge orange" id="agentBadge">connecting…</span></h1>
 
+    <!-- Wallet / Auth card -->
     <div class="card">
-      <button id="connectBtn">Connect Wallet</button>
-      <div>Address: <code id="address">-</code></div>
-      <div>Auth: <span id="authState">not logged in</span></div>
+      <div class="row3">
+        <div>
+          <button id="connectBtn">Connect Wallet</button>
+          <div class="muted" style="margin-top:4px">Address: <code id="address">-</code></div>
+        </div>
+        <div>
+          <div>Auth: <span id="authState" class="muted">not logged in</span></div>
+          <div>Chain ID: <code id="chainIdDisplay">-</code></div>
+        </div>
+        <div>
+          <div>Agent Wallet: <code id="agentAddress">-</code></div>
+          <div>LLM: <span id="llmStatus" class="muted">-</span></div>
+        </div>
+      </div>
     </div>
 
-    <div class="card">
-      <h3>Create / Use Actions</h3>
-      <div class="tabs">
-        <button class="tab-btn active" data-tab="runWorkflow">1) Build App/Website/Game</button>
-        <button class="tab-btn" data-tab="useService">2) Create Token</button>
-        <button class="tab-btn" data-tab="makeTask">3) Create Task Event</button>
-      </div>
+    <!-- Main Nav Tabs -->
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-page="actions">Actions</button>
+      <button class="nav-tab" data-page="llm">AI Chat</button>
+      <button class="nav-tab" data-page="a2a">A2A Agents</button>
+      <button class="nav-tab" data-page="x402">x402 / MCP</button>
+      <button class="nav-tab" data-page="history">History</button>
+    </div>
 
-      <div id="panel-runWorkflow" class="panel">
-        <div class="row">
-          <div><label>Project Name</label><input id="wfName" placeholder="base-social-game-builder" /></div>
-          <div>
-            <label>App Type</label>
-            <select id="wfAppType">
-              <option value="web-app">Web App</option>
-              <option value="website">Website</option>
-              <option value="game">Game</option>
-            </select>
+    <!-- PAGE: Actions -->
+    <div id="page-actions" class="page-panel">
+      <div class="card">
+        <h3>Create / Use Actions</h3>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="runWorkflow">🏗 Build App/Website/Game</button>
+          <button class="tab-btn"        data-tab="useService">🪙 Create Token</button>
+          <button class="tab-btn"        data-tab="makeTask">🚀 Create Task Event</button>
+        </div>
+
+        <!-- runWorkflow -->
+        <div id="panel-runWorkflow" class="panel">
+          <div class="row">
+            <div><label>Project Name</label><input id="wfName" placeholder="base-social-game-builder" /></div>
+            <div>
+              <label>App Type</label>
+              <select id="wfAppType">
+                <option value="web-app">Web App</option>
+                <option value="website">Website</option>
+                <option value="game">Game</option>
+              </select>
+            </div>
+          </div>
+          <label>Objective</label><input id="wfObjective" placeholder="create_web3_game" />
+          <label>Features (comma separated)</label><input id="wfFeatures" placeholder="wallet connect, base mainnet, leaderboard" />
+          <label>Workflow Webhook URL</label><input id="wfWebhook" placeholder="https://your-builder-api.example.com/create" />
+          <label>USDC Value (min 1)</label><input id="wfUsdc" type="number" min="1" step="0.01" value="1" />
+          <div style="margin-top:8px">
+            <button class="btn-sec" id="wfAssistBtn" style="width:auto;padding:6px 12px;font-size:13px">✨ AI Assist – generate from description</button>
           </div>
         </div>
-        <label>Objective</label><input id="wfObjective" placeholder="create_web3_game" />
-        <label>Features (comma separated)</label><input id="wfFeatures" placeholder="wallet connect, base mainnet, leaderboard" />
-        <label>Workflow Webhook URL</label><input id="wfWebhook" placeholder="https://your-builder-api.example.com/create" />
-        <label>USDC Value (min 1)</label><input id="wfUsdc" type="number" min="1" step="0.01" value="1" />
+
+        <!-- useService -->
+        <div id="panel-useService" class="panel hidden">
+          <div class="row">
+            <div><label>Token Name</label><input id="tkName" placeholder="SPAT Quest Reward" /></div>
+            <div><label>Token Symbol</label><input id="tkSymbol" placeholder="SQR" /></div>
+          </div>
+          <div class="row">
+            <div><label>Total Supply (raw units)</label><input id="tkSupply" placeholder="1000000000000000000000000" /></div>
+            <div><label>Based on Project (optional)</label><input id="tkProject" placeholder="base-social-game-builder" /></div>
+          </div>
+          <label>Deploy Webhook URL</label><input id="tkWebhook" placeholder="https://your-token-api.example.com/deploy" />
+          <label>USDC Value (min 1)</label><input id="tkUsdc" type="number" min="1" step="0.01" value="1" />
+        </div>
+
+        <!-- makeTask -->
+        <div id="panel-makeTask" class="panel hidden">
+          <div class="row">
+            <div><label>Task Title</label><input id="tsTitle" placeholder="Farcaster growth quest" /></div>
+            <div><label>Platform</label><input id="tsPlatform" value="farcaster" /></div>
+          </div>
+          <div class="row">
+            <div><label>Social Action</label><input id="tsAction" value="follow_like_recast" /></div>
+            <div><label>Target URL/Profile</label><input id="tsTarget" placeholder="farcaster.xyz/yourprofile" /></div>
+          </div>
+          <label>Details</label><textarea id="tsDetails" rows="3" placeholder="Follow profile and like+recast pinned cast"></textarea>
+          <div class="row">
+            <div><label>Reward Token Address</label><input id="tsRewardToken" placeholder="0x..." /></div>
+            <div><label>Reward per completion USDC (min 5)</label><input id="tsRewardUsdc" type="number" min="5" step="0.01" value="5" /></div>
+          </div>
+          <label>USDC Value (min 1)</label><input id="tsUsdc" type="number" min="1" step="0.01" value="1" />
+        </div>
+
+        <div id="validation" class="validation"></div>
+        <button id="runBtn" style="margin-top:8px">Approve + Charge + Execute</button>
+
+        <ul id="timeline" class="timeline" style="margin-top:12px">
+          <li data-step="validate" class="todo">Validate input</li>
+          <li data-step="connect"  class="todo">Connect wallet</li>
+          <li data-step="auth"     class="todo">Sign SIWE login</li>
+          <li data-step="approve"  class="todo">Approve SPAT spending</li>
+          <li data-step="charge"   class="todo">Charge usage on-chain</li>
+          <li data-step="execute"  class="todo">Execute action</li>
+        </ul>
+        <div id="status" style="margin-top:8px;font-weight:600"></div>
       </div>
-
-      <div id="panel-useService" class="panel hidden">
-        <div class="row">
-          <div><label>Token Name</label><input id="tkName" placeholder="SPAT Quest Reward" /></div>
-          <div><label>Token Symbol</label><input id="tkSymbol" placeholder="SQR" /></div>
-        </div>
-        <div class="row">
-          <div><label>Total Supply (raw units)</label><input id="tkSupply" placeholder="1000000000000000000000000" /></div>
-          <div><label>Based on Project (optional)</label><input id="tkProject" placeholder="base-social-game-builder" /></div>
-        </div>
-        <label>Deploy Webhook URL</label><input id="tkWebhook" placeholder="https://your-token-api.example.com/deploy" />
-        <label>USDC Value (min 1)</label><input id="tkUsdc" type="number" min="1" step="0.01" value="1" />
-      </div>
-
-      <div id="panel-makeTask" class="panel hidden">
-        <div class="row">
-          <div><label>Task Title</label><input id="tsTitle" placeholder="Farcaster growth quest" /></div>
-          <div><label>Platform</label><input id="tsPlatform" placeholder="farcaster" value="farcaster" /></div>
-        </div>
-        <div class="row">
-          <div><label>Action</label><input id="tsAction" placeholder="follow_like_recast" value="follow_like_recast" /></div>
-          <div><label>Target URL/Profile</label><input id="tsTarget" placeholder="farcaster.xyz/yourprofile" /></div>
-        </div>
-        <label>Details</label><textarea id="tsDetails" rows="3" placeholder="Follow profile and like+recast pinned cast"></textarea>
-        <div class="row">
-          <div><label>Reward Token Address</label><input id="tsRewardToken" placeholder="0x..." /></div>
-          <div><label>Reward per completion USDC (min 5)</label><input id="tsRewardUsdc" type="number" min="5" step="0.01" value="5" /></div>
-        </div>
-        <label>USDC Value (min 1)</label><input id="tsUsdc" type="number" min="1" step="0.01" value="1" />
-      </div>
-
-      <div id="validation" class="validation"></div>
-      <button id="runBtn">Approve + Charge + Execute</button>
-
-      <ul id="timeline" class="timeline">
-        <li data-step="validate" class="todo">Validate input</li>
-        <li data-step="connect" class="todo">Connect wallet</li>
-        <li data-step="auth" class="todo">Sign SIWE login</li>
-        <li data-step="approve" class="todo">Approve SPAT spending</li>
-        <li data-step="charge" class="todo">Charge usage on-chain</li>
-        <li data-step="execute" class="todo">Execute action</li>
-      </ul>
-
-      <div class="muted">No JSON editing needed — payload is generated automatically.</div>
-      <div id="status"></div>
     </div>
 
-    <div class="card">
-      <div class="row">
-        <h3>Job History</h3>
-        <button id="refreshHistoryBtn">Refresh</button>
+    <!-- PAGE: AI Chat -->
+    <div id="page-llm" class="page-panel hidden">
+      <div class="card">
+        <h3>AI Chat (OpenRouter / <span id="llmModelDisplay">-</span>)</h3>
+        <div class="llm-msgs" id="llmMsgs"><div class="muted" style="padding:8px">Login and start chatting with the SPAT Agent AI.</div></div>
+        <div class="llm-input-row">
+          <input id="llmInput" placeholder="Ask anything about SPAT Agent, Base, tokens…" />
+          <button id="llmSendBtn">Send</button>
+        </div>
+        <div style="margin-top:10px">
+          <h3>AI Assist – generate action payload from plain English</h3>
+          <input id="assistInput" placeholder="e.g. Build a social prediction game on Base with wallet login" />
+          <button id="assistBtn" style="margin-top:4px">✨ Generate Payload</button>
+          <pre id="assistOutput" class="hidden"></pre>
+        </div>
       </div>
-      <div id="history" class="muted">No history loaded yet.</div>
+    </div>
+
+    <!-- PAGE: A2A Agents -->
+    <div id="page-a2a" class="page-panel hidden">
+      <div class="card">
+        <h3>This Agent's Card</h3>
+        <pre id="agentCardPre" class="muted">Loading…</pre>
+      </div>
+      <div class="card">
+        <h3>Known Peer Agents</h3>
+        <div class="row" style="margin-bottom:8px">
+          <input id="discoverUrl" placeholder="https://peer-agent.example.com" />
+          <button id="discoverBtn" style="width:auto">Discover Agent</button>
+        </div>
+        <div id="peerList" class="muted">No peers discovered yet.</div>
+      </div>
+      <div class="card">
+        <h3>Call a Peer Agent</h3>
+        <div class="row">
+          <input id="callUrl"   placeholder="Peer agent A2A URL" />
+          <input id="callSkill" placeholder="Skill ID (e.g. llm_chat)" value="llm_chat" />
+        </div>
+        <input id="callMsg" placeholder="Message to send" />
+        <button id="callAgentBtn" style="margin-top:6px">Call Agent</button>
+        <pre id="callResult" class="hidden"></pre>
+      </div>
+    </div>
+
+    <!-- PAGE: x402 / MCP -->
+    <div id="page-x402" class="page-panel hidden">
+      <div class="card">
+        <h3>x402 – HTTP 402 Machine Payments</h3>
+        <div class="x402-info">
+          <p><strong>x402</strong> lets AI agents, scripts, and CLIs call paid endpoints <em>without</em> a browser session.
+          Instead of SIWE login, the caller sends an <code>X-Payment</code> header with a base64-encoded on-chain payment proof.</p>
+          <p>Paid endpoints on this agent:</p>
+          <ul>
+            <li><code>POST /x402/llm</code> – LLM chat (0.5 SPAT)</li>
+            <li><code>POST /x402/workflow</code> – Workflow execution (3 SPAT)</li>
+          </ul>
+          <p>Payment flow: approve SPAT → call <code>charge()</code> on the Usage contract → encode receipt as base64 JSON → add <code>X-Payment</code> header → call endpoint.</p>
+          <p>If payment header is missing or invalid, the endpoint returns HTTP 402 with a <code>accepts[]</code> array describing what's needed.</p>
+        </div>
+        <div style="margin-top:12px">
+          <button id="x402TestBtn" class="btn-sec">Test /x402/llm (no payment – expect 402)</button>
+          <pre id="x402Result" class="hidden"></pre>
+        </div>
+      </div>
+      <div class="card">
+        <h3>MCP Server (Model Context Protocol)</h3>
+        <div class="x402-info">
+          <p>The MCP server runs on port <strong id="mcpPortDisplay">8788</strong> and exposes SPAT Agent capabilities as tools for Claude, Cursor, and any MCP-compatible client.</p>
+          <p>Add to your Claude Desktop / Cursor config:</p>
+          <pre>{
+  "mcpServers": {
+    "spat-agent": {
+      "url": "http://localhost:8788"
+    }
+  }
+}</pre>
+          <p>Available MCP tools: <code>spat_llm_chat</code>, <code>spat_build_app</code>, <code>spat_create_token</code>, <code>spat_social_growth</code>, <code>spat_agent_info</code>, <code>spat_a2a_call</code></p>
+        </div>
+        <button id="mcpListBtn" class="btn-sec" style="margin-top:8px">List MCP Tools</button>
+        <pre id="mcpResult" class="hidden"></pre>
+      </div>
+    </div>
+
+    <!-- PAGE: History -->
+    <div id="page-history" class="page-panel hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0">Job History</h3>
+          <button id="refreshHistoryBtn" class="btn-sec" style="width:auto">Refresh</button>
+        </div>
+        <div id="history" class="muted">Login and run at least one action to view history.</div>
+      </div>
     </div>
 
     <script src="./config.js"></script>
